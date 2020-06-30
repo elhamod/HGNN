@@ -32,10 +32,6 @@ def main(cuda, experimentsPath, dataPath, experimentName):
 
     # init experiments file
     experimentsFileNameAndPath = os.path.join(experimentsPath, experimetnsFileName)
-    if os.path.exists(experimentsFileNameAndPath):
-        experiments_df = pd.read_csv(experimentsFileNameAndPath)
-    else:
-        experiments_df = pd.DataFrame()
     
     # load data
     datasetManager = dataLoader.datasetManager(experimentPathAndName)
@@ -51,7 +47,7 @@ def main(cuda, experimentsPath, dataPath, experimentName):
             bar.set_postfix(experiment_params, model_type=experiment_params["modelType"])
             bar.update()
 
-            # load images
+            # load images 
             datasetManager.updateParams(config_parser.fixPaths(experiment_params))
             dataset = datasetManager.getDataset()
             train_loader, validation_loader, test_loader = datasetManager.getLoaders()
@@ -77,17 +73,23 @@ def main(cuda, experimentsPath, dataPath, experimentName):
                     CNN.trainModel(train_loader, validation_loader, experiment_params, model, trialName, test_loader)
 
                 # Add to experiments file
+                if os.path.exists(experimentsFileNameAndPath):
+                    experiments_df = pd.read_csv(experimentsFileNameAndPath)
+                else:
+                    experiments_df = pd.DataFrame()
+
                 record_exists = (experiments_df['modelName'] == modelName).any() if not experiments_df.empty else False
                 if record_exists:
                     experiments_df.drop(experiments_df[experiments_df['modelName'] == modelName].index, inplace = True) 
                 row_information = {
                     'experimentName': experimentName,
                     'modelName': modelName,
-                    'datasetName': getDatasetName(experiment_params),
+                    'datasetName': getDatasetName(config_parser.fixPaths(experiment_params)),
                     'experimentHash': TrialStatistics.getTrialName(experiment_params),
                     'trialHash': TrialStatistics.getTrialName(experiment_params, i)
                 }
                 row_information = {**row_information, **experiment_params} 
+
                 experiments_df = experiments_df.append(pd.DataFrame(row_information, index=[0]), ignore_index = True)
                 experiments_df.to_csv(experimentsFileNameAndPath, header=True, index=False)
 
