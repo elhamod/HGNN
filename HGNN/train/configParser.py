@@ -4,6 +4,7 @@ import os
 import itertools
 import hashlib
 import copy
+import pandas as pd
     
 def getDatasetParams(params):
     return {
@@ -29,12 +30,38 @@ def getModelName(params, trial_id=None):
     
     return os.path.join('models',modelName)
 
+experimetnsFileName = "experiments.csv"
+paramsFileName="params.json"
+
+def getExperimentParamsAndRecord(experimentsPath, experimentName, trial_hash) :
+    experimentsFileNameAndPath = os.path.join(experimentsPath, experimetnsFileName)
+    if os.path.exists(experimentsFileNameAndPath):
+        experiments_df = pd.read_csv(experimentsFileNameAndPath)
+        experimentRecord = experiments_df[experiments_df["trialHash"] == trial_hash]
+        experimentRecord = experimentRecord[experimentRecord["experimentName"] == experimentName]
+        # experiment_params = experimentRecord.to_dict('records')[0]
+
+        modelName = experimentRecord.iloc[0]["modelName"]
+        experimentNameAndPath = os.path.join(experimentsPath, experimentName)
+        modelNameAndPath = os.path.join(experimentNameAndPath, modelName)
+        fullFileName = os.path.join(modelNameAndPath, paramsFileName)
+        with open(fullFileName, 'rb') as f:
+            experiment_params = json.loads(f.read())
+        return experiment_params, experimentRecord
+    else:
+        raise Exception("Experiment not " + trial_hash + " found!")
+
+
+
+
+
 configJsonFileName = "params.json"
 
 class ConfigParser:
     def __init__(self, experimentsPath, dataPath, experimentName):
         self.experimentName = experimentName
         self.experimentsPath = experimentsPath
+        self.experimentNameAndPath = os.path.join(self.experimentsPath, self.experimentName)
         self.dataPath = dataPath
         self.base_params = None
             
@@ -42,13 +69,14 @@ class ConfigParser:
         self.base_params = base_params
         fileName = configJsonFileName if experiment_type != "Random" else configPickleFileName
         
-        fullFileName = os.path.join(self.experimentsPath, self.experimentName, fileName)
+        fullFileName = os.path.join(self.experimentNameAndPath, fileName)
         if os.path.exists(self.experimentName) and os.path.exists(fullFileName):
-            self.experimentName = self.experimentName+"-"+hex(int(time.time()))   
-        fullFileName = os.path.join(self.experimentName, fileName)
+            self.experimentName = self.experimentName+"-"+hex(int(time.time()))  
+            self.experimentNameAndPath = os.path.join(self.experimentsPath, self.experimentName)
+        fullFileName = os.path.join(self.experimentNameAndPath, fileName)
         
-        if not os.path.exists(self.experimentName):
-            os.makedirs(self.experimentName)
+        if not os.path.exists(self.experimentNameAndPath):
+            os.makedirs(self.experimentNameAndPath)
 
 
         experimentList = []
@@ -88,11 +116,11 @@ class ConfigParser:
         return fullFileName
 
     
-    def getExperiments(self):
-        fullFileName = os.path.join(self.experimentsPath, self.experimentName, configJsonFileName)
+    def getExperiments(self, fixExperiments=True):
+        fullFileName = os.path.join(self.experimentNameAndPath, configJsonFileName)
         if os.path.exists(fullFileName):
             with open(fullFileName, 'rb') as f:
-                experimentList = list(map(lambda x: self.fixExperimentParams(x), json.loads(f.read())["experimentList"]))
+                experimentList = list(map(lambda x: self.fixExperimentParams(x) if fixExperiments else x , json.loads(f.read())["experimentList"]))
 
             return iter(experimentList)
         else:
@@ -100,7 +128,7 @@ class ConfigParser:
     
     # For hyper param search, fixExperimentParams needs to be called outside. TODO: fix that requirement
     def getHyperoptSearchObject(self):
-        fullFileName = os.path.join(self.experimentsPath, self.experimentName, configPickleFileName)
+        fullFileName = os.path.join(self.experimentNameAndPath, configPickleFileName)
         if os.path.exists(fullFileName):   
             with open(fullFileName, 'rb') as f:
                 hyperp_search_params = pickle.load(f)
@@ -134,5 +162,6 @@ class ConfigParser:
         params["numOfTrials"] = params["numOfTrials"] if ("numOfTrials" in params) else 1
         params["tl_model"] = params["tl_model"] if ("tl_model" in params) else "ResNet18"
         params["augmented"] = params["augmented"] if ("augmented" in params) else False
+        params["weight_decay"] = params["weight_decay"] if ("weight_decay" in params) else 0
         
         return params

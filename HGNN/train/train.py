@@ -44,7 +44,7 @@ def main(cuda, experimentsPath, dataPath, experimentName):
     # with progressbar.ProgressBar(max_value=number_of_experiments) as bar:
     with tqdm(total=number_of_experiments, desc="experiment") as bar:
         for experiment_params in config_parser.getExperiments():
-            bar.set_postfix(experiment_params, model_type=experiment_params["modelType"])
+            print(experiment_params)
             bar.update()
 
             # load images 
@@ -65,6 +65,16 @@ def main(cuda, experimentsPath, dataPath, experimentName):
                 modelName = getModelName(experiment_params, i)
                 trialName = os.path.join(experimentPathAndName, modelName)
 
+                row_information = {
+                    'experimentName': experimentName,
+                    'modelName': modelName,
+                    'datasetName': getDatasetName(config_parser.fixPaths(experiment_params)),
+                    'experimentHash': TrialStatistics.getTrialName(experiment_params),
+                    'trialHash': TrialStatistics.getTrialName(experiment_params, i)
+                }
+                row_information = {**row_information, **experiment_params} 
+                print(row_information)
+
                 # Train/Load model
                 model = CNN.create_model(architecture, experiment_params)
                 if os.path.exists(CNN.getModelFile(trialName)):
@@ -78,17 +88,9 @@ def main(cuda, experimentsPath, dataPath, experimentName):
                 else:
                     experiments_df = pd.DataFrame()
 
-                record_exists = (experiments_df['modelName'] == modelName).any() if not experiments_df.empty else False
+                record_exists = not (experiments_df[experiments_df['modelName'] == modelName][experiments_df['experimentName'] == experimentName]).empty if not experiments_df.empty else False
                 if record_exists:
-                    experiments_df.drop(experiments_df[experiments_df['modelName'] == modelName].index, inplace = True) 
-                row_information = {
-                    'experimentName': experimentName,
-                    'modelName': modelName,
-                    'datasetName': getDatasetName(config_parser.fixPaths(experiment_params)),
-                    'experimentHash': TrialStatistics.getTrialName(experiment_params),
-                    'trialHash': TrialStatistics.getTrialName(experiment_params, i)
-                }
-                row_information = {**row_information, **experiment_params} 
+                    experiments_df.drop(experiments_df[experiments_df['modelName'] == modelName][experiments_df['experimentName'] == experimentName].index, inplace = True) 
 
                 experiments_df = experiments_df.append(pd.DataFrame(row_information, index=[0]), ignore_index = True)
                 experiments_df.to_csv(experimentsFileNameAndPath, header=True, index=False)

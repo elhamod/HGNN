@@ -38,14 +38,13 @@ class FishDataset(Dataset):
         self.normalization_enabled = True
         self.normalizer = None
         self.composedTransforms = None
-        self.fineTocoarseMatrix = None # Maps a vector of fine to coarse.
         
         data_root_suffix = os.path.join(self.data_root, self.suffix)
         if not os.path.exists(data_root_suffix):
             os.makedirs(data_root_suffix)
         
 
-        self.csv_processor = CSV_processor(self.data_root, self.suffix)
+        self.csv_processor = CSV_processor(self.data_root, self.suffix, self.imageDimension, self.augmentation_enabled)
         
         # Create transfroms
         if self.normalizer is None:

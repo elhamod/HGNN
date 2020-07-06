@@ -153,7 +153,7 @@ class CNN_hierarchy(nn.Module):
         g_c_num_ftrs = fc_width
         if modelType == "HGNNgcI":
             self.g_c = torch.nn.Identity()
-        elif modelType != "HGNNgc0" or modelType != "BB":
+        elif modelType != "HGNNgc0" and modelType != "BB":
             self.g_c = get_fc(fc_width, self.numberOfCoarse, num_of_layers=fc_layers)
             g_c_num_ftrs = self.numberOfCoarse
         
@@ -242,7 +242,9 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     batchSize = params["batchSize"]
     unsupervisedOnTest = params["unsupervisedOnTest"]
     lambda_ = params["lambda"]
+    weight_decay = params["weight_decay"]
     isOldBlackbox = (modelType == "basic_blackbox")
+    isBlackbox = (modelType == "BB")
     isDSN = (modelType == "DSN")
     
     df = pd.DataFrame()
@@ -250,7 +252,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     if not os.path.exists(savedModelName):
         os.makedirs(savedModelName)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr = learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr = learning_rate, weight_decay=weight_decay)
     
     # early stopping
     early_stopping = EarlyStopping(path=savedModelName, patience=patience)
@@ -297,8 +299,8 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                 'validation_loss': getCrossEntropyFromLoader(validation_loader, model, params),
                 'training_loss': getCrossEntropyFromLoader(train_loader, model, params),
 
-                'training_coarse_loss': getCrossEntropyFromLoader(train_loader, model, params, "coarse") if not isOldBlackbox and not isDSN else None,
-                'validation_coarse_loss': getCrossEntropyFromLoader(validation_loader, model, params, "coarse") if not isOldBlackbox and not isDSN else None,
+                'training_coarse_loss': getCrossEntropyFromLoader(train_loader, model, params, "coarse") if not isOldBlackbox and not isDSN and not isBlackbox else None,
+                'validation_coarse_loss': getCrossEntropyFromLoader(validation_loader, model, params, "coarse") if not isOldBlackbox and not isDSN and not isBlackbox else None,
                 'training_coarse_f1': getLoader_f1(train_loader, model, params, "coarse") if not isDSN else None,
                 'validation_coarse_f1': getLoader_f1(validation_loader, model, params, "coarse")if not isDSN else None,
                 'test_coarse_f1': getLoader_f1(test_loader, model, params, "coarse") if test_loader and not isDSN else None,
@@ -420,7 +422,15 @@ def getLoaderPredictionProbabilities(loader, model, params, label="fine"):
             classes = batch[label]
             preds = applyModel(inputs, model)
             if not isOldBlackbox:
-                preds = preds[label]
+                if label in preds and preds[label] is not None:
+                    preds = preds[label]
+                elif label == 'coarse':
+                    fineToCoarseMatrix = loader.dataset.csv_processor.getFineToCoarseMatrix()
+                    if torch.cuda.is_available():
+                        fineToCoarseMatrix = fineToCoarseMatrix.cuda()
+                    preds = torch.mm(preds['fine'],fineToCoarseMatrix) 
+                else:
+                    raise
             preds = torch.nn.Softmax(dim=1)(preds)
 
             # Append batch prediction results

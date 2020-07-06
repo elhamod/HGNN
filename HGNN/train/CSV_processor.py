@@ -28,9 +28,11 @@ image_subpath = "images"
 
 # Loads, processes, cleans up and analyise fish metadata
 class CSV_processor:
-    def __init__(self, data_root, suffix, verbose=False):
+    def __init__(self, data_root, suffix, imageDimension, augmentation_enabled, verbose=False):
         self.data_root = data_root
         self.suffix = suffix
+        self.augmentation_enabled = augmentation_enabled
+        self.imageDimension = imageDimension
         self.image_subpath = image_subpath
         self.fine_csv = None
         self.samples = []
@@ -117,7 +119,6 @@ class CSV_processor:
         FoundFileNames = []
         with tqdm(total=len(fileNames), desc="Loading images") as bar:
             for fileName in fileNames:
-                bar.set_postfix(fileName=fileName) 
                 try:
                     # Find match in csv file
                     matchRow = self.fine_csv.loc[fileName]
@@ -128,14 +129,22 @@ class CSV_processor:
                     # Go through original and augmented image   
                     images = []
                     prefix, ext = os.path.splitext(fileName)
-                    original = Image.open(os.path.join(img_full_path, fileName))
+                    scaledFile = os.path.join(img_full_path, prefix+"_"+str(self.imageDimension)+ext)
+                    if os.path.exists(scaledFile):
+                        original = Image.open(scaledFile)
+                        bar.set_postfix(fileName=scaledFile)
+                    else:
+                        fileNameAndPath = os.path.join(img_full_path, fileName)
+                        original = Image.open(fileNameAndPath)
+                        bar.set_postfix(fileName=fileNameAndPath)
                     original.load()
                     images.append(original)
-                    for file in glob.glob(os.path.join(img_full_path, prefix+"_aug*"+ext)):
-                        bar.set_postfix(fileName=file) 
-                        augmented = Image.open(os.path.join(img_full_path, file))
-                        images.append(augmented)  # Converting to np is making this loading slow! For future, always use Image.open alone and only convert to np when needed (e.g. matlab display)
-                        augmented.load()
+                    if self.augmentation_enabled:
+                        for file in glob.glob(os.path.join(img_full_path, prefix+"_"+str(self.imageDimension)+"_aug*"+ext)):
+                            bar.set_postfix(fileName=file) 
+                            augmented = Image.open(os.path.join(img_full_path, file))
+                            images.append(augmented)  # Converting to np is making this loading slow! For future, always use Image.open alone and only convert to np when needed (e.g. matlab display)
+                            augmented.load()
 
                     sampleInfo = {
                         'fine': matchFine,
