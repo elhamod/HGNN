@@ -131,7 +131,7 @@ class CSV_processor:
                     prefix, ext = os.path.splitext(fileName)
                     scaledFile = os.path.join(img_full_path, prefix+"_"+str(self.imageDimension)+ext)
                     if os.path.exists(scaledFile):
-                        original = Image.open(scaledFile)
+                        original = Image.open(scaledFile)   
                         bar.set_postfix(fileName=scaledFile)
                     else:
                         fileNameAndPath = os.path.join(img_full_path, fileName)
