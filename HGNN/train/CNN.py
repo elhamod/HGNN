@@ -59,6 +59,7 @@ def get_fc(num_of_inputs, num_of_outputs, num_of_layers = 1):
 
 def create_pretrained_model(params):
     tl_model = params["tl_model"]
+    tl_freeze = params["tl_freeze"]
     
     if tl_model == "NIN":
         model = nin_cifar100(pretrained=True)
@@ -71,8 +72,9 @@ def create_pretrained_model(params):
     else:
         raise Exception('Unknown network type')
         
-    for param in model.parameters():
-        param.requires_grad = False
+    if tl_freeze:
+        for param in model.parameters():
+            param.requires_grad = False
         
     if tl_model != "NIN":
         num_ftrs = model.fc.in_features

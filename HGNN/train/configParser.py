@@ -163,5 +163,9 @@ class ConfigParser:
         params["tl_model"] = params["tl_model"] if ("tl_model" in params) else "ResNet18"
         params["augmented"] = params["augmented"] if ("augmented" in params) else False
         params["weight_decay"] = params["weight_decay"] if ("weight_decay" in params) else 0
+        params["img_res"] = params["img_res"] if ("img_res" in params) else 224
+        params["tl_freeze"] = params["tl_freeze"] if ("tl_freeze" in params) else True
+        params["cnn_layers"] = params["cnn_layers"] if ("cnn_layers" in params) else 0
+        params["cnn_channels"] = params["cnn_channels"] if ("cnn_channels" in params) else 128
         
         return params

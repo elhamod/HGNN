@@ -28,7 +28,7 @@ image_subpath = "images"
 
 # Loads, processes, cleans up and analyise fish metadata
 class CSV_processor:
-    def __init__(self, data_root, suffix, imageDimension, augmentation_enabled, verbose=False):
+    def __init__(self, data_root, suffix, augmentation_enabled=False, imageDimension=None, verbose=False):
         self.data_root = data_root
         self.suffix = suffix
         self.augmentation_enabled = augmentation_enabled
@@ -130,7 +130,8 @@ class CSV_processor:
                     images = []
                     prefix, ext = os.path.splitext(fileName)
                     scaledFile = os.path.join(img_full_path, prefix+"_"+str(self.imageDimension)+ext)
-                    if os.path.exists(scaledFile):
+                    # if imageDimension is None, then load orginals, not scaled.
+                    if self.imageDimension is not None and os.path.exists(scaledFile):
                         original = Image.open(scaledFile)   
                         bar.set_postfix(fileName=scaledFile)
                     else:
@@ -139,7 +140,7 @@ class CSV_processor:
                         bar.set_postfix(fileName=fileNameAndPath)
                     original.load()
                     images.append(original)
-                    if self.augmentation_enabled:
+                    if self.augmentation_enabled and self.imageDimension is not None:
                         for file in glob.glob(os.path.join(img_full_path, prefix+"_"+str(self.imageDimension)+"_aug*"+ext)):
                             bar.set_postfix(fileName=file) 
                             augmented = Image.open(os.path.join(img_full_path, file))

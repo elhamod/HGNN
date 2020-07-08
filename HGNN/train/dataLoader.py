@@ -31,7 +31,7 @@ class FishDataset(Dataset):
     def __init__(self, params, verbose=False):
         self.transformedSamples = {} # caches the transformed samples to speed training up
         self.imageIndicesPerfine = {} # A hash map for fast retreival
-        self.imageDimension = 224
+        self.imageDimension = params["img_res"] # if None, CSV_processor will load original images
         self.n_channels = 3
         self.data_root, self.suffix  = getParams(params)
         self.augmentation_enabled = params["augmented"]
@@ -44,7 +44,7 @@ class FishDataset(Dataset):
             os.makedirs(data_root_suffix)
         
 
-        self.csv_processor = CSV_processor(self.data_root, self.suffix, self.imageDimension, self.augmentation_enabled)
+        self.csv_processor = CSV_processor(self.data_root, self.suffix, self.augmentation_enabled, self.imageDimension)
         
         # Create transfroms
         if self.normalizer is None:
@@ -92,20 +92,23 @@ class FishDataset(Dataset):
 
     # Makes the image squared while still preserving the aspect ratio
     def MakeSquared(self, img):
+        # if imageDimension is None, resize to 224 which works for pretrained ResNet.
+        imageDimension = 224 if self.imageDimension is None else self.imageDimension
+
         img_H = img.size[0]
         img_W = img.size[1]
 
         # Resize
         smaller_dimension = 0 if img_H < img_W else 1
         larger_dimension = 1 if img_H < img_W else 0
-        new_smaller_dimension = int(self.imageDimension * img.size[smaller_dimension] / img.size[larger_dimension])
+        new_smaller_dimension = int(imageDimension * img.size[smaller_dimension] / img.size[larger_dimension])
         if smaller_dimension == 1:
-            img = transforms.functional.resize(img, (new_smaller_dimension, self.imageDimension))
+            img = transforms.functional.resize(img, (new_smaller_dimension, imageDimension))
         else:
-            img = transforms.functional.resize(img, (self.imageDimension, new_smaller_dimension))
+            img = transforms.functional.resize(img, (imageDimension, new_smaller_dimension))
 
         # pad
-        diff = self.imageDimension - new_smaller_dimension
+        diff = imageDimension - new_smaller_dimension
         pad_1 = int(diff/2)
         pad_2 = diff - pad_1
     #         if self.normalizeFromResnet:
