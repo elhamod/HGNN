@@ -232,14 +232,6 @@ class datasetManager:
             self.experiment_folder_name = os.path.join(self.data_root, self.suffix, self.experimentName)
             self.dataset_folder_name = os.path.join(self.experiment_folder_name, datasetName)
             self.datasetName = datasetName
-
-
-        # except for augmentation, if dataset has changed, reset the indices     
-
-        if self_params_copy is not None:
-            self_params_copy["augmented"] = None 
-        params_copy["augmented"] = None 
-        if (self_params_copy is None) or (getDatasetName(params_copy) != getDatasetName(self_params_copy)):
             self.loader_indices = []
         
     def getDataset(self):

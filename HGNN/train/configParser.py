@@ -6,13 +6,15 @@ import hashlib
 import copy
 import pandas as pd
     
+#TODO: All experiments wit datasplit params having augmented should have it removed.
+# This is because being augmented should have same split if it is not augmented.
 def getDatasetParams(params):
     return {
         "training_count": params["training_count"],
         "validation_count": params["validation_count"],
         "image_path": params["image_path"],
         "suffix": params['suffix'],
-        "augmented": params['augmented'],
+        # "augmented": params['augmented'],
     }
     
 def getDatasetName(params):
