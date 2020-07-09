@@ -166,6 +166,6 @@ class ConfigParser:
         params["img_res"] = params["img_res"] if ("img_res" in params) else 224
         params["tl_freeze"] = params["tl_freeze"] if ("tl_freeze" in params) else True
         params["cnn_layers"] = params["cnn_layers"] if ("cnn_layers" in params) else 0
-        params["cnn_channels"] = params["cnn_channels"] if ("cnn_channels" in params) else 128
+        params["cnn_channels"] = params["cnn_channels"] if ("cnn_channels" in params) else 32
         
         return params
