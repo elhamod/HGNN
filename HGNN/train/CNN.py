@@ -103,15 +103,16 @@ def get_conv(input_res, output_res, input_num_of_channels, intermediate_num_of_c
 def create_pretrained_model(params):
     tl_model = params["tl_model"]
     tl_freeze = params["tl_freeze"]
+    pretrained = params["pretrained"]
     
     if tl_model == "NIN":
-        model = nin_cifar100(pretrained=True)
+        model = nin_cifar100(pretrained=pretrained)
     elif tl_model == "CIFAR":
-        model = cifar_resnet56(pretrained='cifar100')
+        model = cifar_resnet56(pretrained='cifar100' if pretrained else False)
     elif tl_model == "ResNet18":
-        model = models.resnet18(pretrained=True)
+        model = models.resnet18(pretrained=pretrained)
     elif tl_model == "ResNet50":
-        model = models.resnet50(pretrained=True)
+        model = models.resnet50(pretrained=pretrained)
     else:
         raise Exception('Unknown network type')
         
@@ -499,6 +500,33 @@ def getLoaderPredictions(loader, model, params, label="fine"):
 def getLoader_f1(loader, model, params, label="fine"):
     predlist, lbllist = getLoaderPredictions(loader, model, params, label)
     return f1_score(lbllist, predlist, average='macro')
+
+# Returns the distance between examples in terms of classification cross entropy
+# Augmentation should be disabled
+def get_distance_from_example(dataset, example_1, model, params):
+    isOldBlackbox = (params['modelType'] == "basic_blackbox")
+    criterion = torch.nn.CosineSimilarity()
+    dataset_size = len(dataset)
+    result = torch.zeros(1, dataset_size)
+
+    with torch.set_grad_enabled(True):
+        z_1 = applyModel(example_1["image"].unsqueeze(0), model)
+        if not isOldBlackbox:
+            z_1 = z_1['fine']
+        z_1 = z_1.detach()
+        for j in range(dataset_size):
+            example_2 = dataset[j]
+            z_2 = applyModel(example_2["image"].unsqueeze(0), model)
+
+            if not isOldBlackbox:
+                z_2 = z_2['fine']
+
+            z_2 = z_2.detach()
+            loss = criterion(z_1, z_2)
+
+
+            result[0, j] = loss
+    return result
 
 
 def applyModel(batch, model):

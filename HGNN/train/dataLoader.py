@@ -30,7 +30,6 @@ paramsFileName="params.json"
 class FishDataset(Dataset):
     def __init__(self, params, verbose=False):
         self.transformedSamples = {} # caches the transformed samples to speed training up
-        self.imageIndicesPerfine = {} # A hash map for fast retreival
         self.imageDimension = params["img_res"] # if None, CSV_processor will load original images
         self.n_channels = 3
         self.data_root, self.suffix  = getParams(params)
@@ -288,7 +287,7 @@ class datasetManager:
                 # load the pickles
                 print("Loading saved indices...")
                 for i, name in enumerate(index_fileNames):   
-                    f = readFile( os.path.join(self.dataset_folder_name, name))
+                    f = self.get_indices(name)
                     self.loader_indices.append(f)
                     
 
@@ -320,3 +319,6 @@ class datasetManager:
 
         
         return self.train_loader, self.validation_loader, self.test_loader
+
+    def get_indices(self, indices_file):
+        return readFile(os.path.join(self.dataset_folder_name, indices_file))

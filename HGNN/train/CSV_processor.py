@@ -38,6 +38,7 @@ class CSV_processor:
         self.samples = []
         self.filesPerFine_table = None
         self.filesPerFamilyAndGenis_table = None
+        self.fileName_to_index = {}
         
         self.get_csv_file()
         self.cleanup_csv_file()
@@ -104,6 +105,12 @@ class CSV_processor:
         # and sort
         self.fine_csv = self.fine_csv.sort_values(by=[fine_csv_Family_header, fine_csv_Coarse_header])
 
+    # gets the index form a fileName
+    def get_index_from_fileName(self, fileName):
+        if fileName in self.fileName_to_index:
+            return self.fileName_to_index[fileName]
+        else:
+            raise Exception(f"{fileName} is not in this dataset")
     
     def get_image_full_path(self):
         return os.path.join(self.data_root, self.image_subpath)
@@ -155,6 +162,7 @@ class CSV_processor:
                         'images':  images
                     }
                     self.samples.append(sampleInfo)
+                    self.fileName_to_index[fileName] = len(self.samples)-1
 
                     FoundFileNames.append(fileName)
                 except Exception as inst:
