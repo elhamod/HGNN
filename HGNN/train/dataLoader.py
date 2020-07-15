@@ -12,12 +12,13 @@ import random
 import csv
 import json
 from sklearn.model_selection import train_test_split
-# from PIL import Image, ImageStat
+from PIL import Image, ImageStat
 import hashlib
 from random import randrange
 
 from .configParser import getDatasetName, getDatasetParams
 from .CSV_processor import CSV_processor
+from myhelpers.dataset_normalization import dataset_normalization
 
 
 testIndexFileName = "testIndex.csv"
@@ -34,6 +35,7 @@ class FishDataset(Dataset):
         self.n_channels = 3
         self.data_root, self.suffix  = getParams(params)
         self.augmentation_enabled = params["augmented"]
+        self.normalizeFromResnet = not params["dataset_norm"]
         self.normalization_enabled = True
         self.normalizer = None
         self.composedTransforms = None
@@ -47,8 +49,13 @@ class FishDataset(Dataset):
         
         # Create transfroms
         if self.normalizer is None:
-            self.normalizer = [transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                             std=[0.229, 0.224, 0.225])]
+            if self.normalizeFromResnet:
+                self.normalizer = [transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                std=[0.229, 0.224, 0.225])]
+            else:
+                augmentation, normalization = self.toggle_image_loading(augmentation=False, normalization=False)
+                self.normalizer = dataset_normalization(self).getTransform()
+                self.toggle_image_loading(augmentation, normalization)
     
     def getTransforms(self):
         transformsList = [#transforms.ToPILImage(),
@@ -110,12 +117,12 @@ class FishDataset(Dataset):
         diff = imageDimension - new_smaller_dimension
         pad_1 = int(diff/2)
         pad_2 = diff - pad_1
-    #         if self.normalizeFromResnet:
-        RGBmean = [0.485*255, 0.456*255, 0.406*255]
-        fill = tuple([round(x) for x in RGBmean])
-    #         else:
-    #             stat = ImageStat.Stat(img)
-    #             fill = tuple([round(x) for x in stat.mean])
+        if self.normalizeFromResnet:
+            RGBmean = [0.485*255, 0.456*255, 0.406*255]
+            fill = tuple([round(x) for x in RGBmean])
+        else:
+            stat = ImageStat.Stat(img)
+            fill = tuple([round(x) for x in stat.mean])
 
         if smaller_dimension == 0:
             img = transforms.functional.pad(img, (pad_1, 0, pad_2, 0), padding_mode='constant', fill = fill)

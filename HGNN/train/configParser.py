@@ -153,15 +153,14 @@ class ConfigParser:
         params["validation_count"] = params["validation_count"] if ("validation_count" in params) is not None else 0.16
         params["batchSize"] = params["batchSize"] if ("batchSize" in params) else 32
         params["n_epochs"] = params["n_epochs"] if ("n_epochs" in params) else 10000
-        params["patience"] = params["patience"] if ("patience" in params) else 100
         params["learning_rate"] = params["learning_rate"] if ("learning_rate" in params) else 0.0005
+        params["numOfTrials"] = params["numOfTrials"] if ("numOfTrials" in params) else 1
+        params["patience"] = params["patience"] if ("patience" in params) else 100
         params["fc_width"] = params["fc_width"] if ("fc_width" in params) else 200
         params["fc_layers"] = params["fc_layers"] if ("fc_layers" in params) else 1
         params["modelType"] = params["modelType"] if ("modelType" in params) else "blackbox"
-        params["unsupervisedOnTest"] = params["unsupervisedOnTest"] if ("unsupervisedOnTest" in params) else False
         params["lambda"] = params["lambda"] if ("lambda" in params) else 1
-        params["tl_model"] = params["tl_model"] if ("tl_model" in params) else "ResNet18"
-        params["numOfTrials"] = params["numOfTrials"] if ("numOfTrials" in params) else 1
+        params["unsupervisedOnTest"] = params["unsupervisedOnTest"] if ("unsupervisedOnTest" in params) else False
         params["tl_model"] = params["tl_model"] if ("tl_model" in params) else "ResNet18"
         params["augmented"] = params["augmented"] if ("augmented" in params) else False
         params["weight_decay"] = params["weight_decay"] if ("weight_decay" in params) else 0
@@ -170,5 +169,8 @@ class ConfigParser:
         params["cnn_layers"] = params["cnn_layers"] if ("cnn_layers" in params) else 0
         params["cnn_channels"] = params["cnn_channels"] if ("cnn_channels" in params) else 32
         params["pretrained"] = params["pretrained"] if ("pretrained" in params) else True
+        params["two_nets"] = params["two_nets"] if ("two_nets" in params) else False
+        params["link_layer"] = params["link_layer"] if ("link_layer" in params) else "layer1"
+        params["dataset_norm"] = params["dataset_norm"] if ("dataset_norm" in params) else False
         
         return params

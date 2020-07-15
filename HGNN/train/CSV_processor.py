@@ -26,6 +26,8 @@ fine_csv_usedColumns = [fine_csv_fileName_header,
 # subpath of where images can be found.
 image_subpath = "images"
 
+max_number_of_augmented_images = 100 # TODO make this a params argument
+
 # Loads, processes, cleans up and analyise fish metadata
 class CSV_processor:
     def __init__(self, data_root, suffix, augmentation_enabled=False, imageDimension=None, verbose=False):
@@ -148,11 +150,16 @@ class CSV_processor:
                     original.load()
                     images.append(original)
                     if self.augmentation_enabled and self.imageDimension is not None:
-                        for file in glob.glob(os.path.join(img_full_path, prefix+"_"+str(self.imageDimension)+"_aug*"+ext)):
-                            bar.set_postfix(fileName=file) 
-                            augmented = Image.open(os.path.join(img_full_path, file))
-                            images.append(augmented)  # Converting to np is making this loading slow! For future, always use Image.open alone and only convert to np when needed (e.g. matlab display)
-                            augmented.load()
+                        for k in range(max_number_of_augmented_images):
+                            file = os.path.join(img_full_path, prefix+"_"+str(self.imageDimension)+"_aug"+str(k)+ext)
+                        #for file in glob.glob(os.path.join(img_full_path, prefix+"_"+str(self.imageDimension)+"_aug*"+ext)): # glob is very slow.
+                            if os.path.exists(file):
+                                bar.set_postfix(fileName=file) 
+                                augmented = Image.open(os.path.join(img_full_path, file))
+                                images.append(augmented)  # Converting to np is making this loading slow! For future, always use Image.open alone and only convert to np when needed (e.g. matlab display)
+                                augmented.load()
+                            else:
+                                break
 
                     sampleInfo = {
                         'fine': matchFine,

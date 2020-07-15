@@ -45,7 +45,6 @@ def main(cuda, experimentsPath, dataPath, experimentName):
     with tqdm(total=number_of_experiments, desc="experiment") as bar:
         for experiment_params in config_parser.getExperiments():
             print(experiment_params)
-            bar.update()
 
             # load images 
             datasetManager.updateParams(config_parser.fixPaths(experiment_params))
@@ -95,7 +94,8 @@ def main(cuda, experimentsPath, dataPath, experimentName):
                 experiments_df = experiments_df.append(pd.DataFrame(row_information, index=[0]), ignore_index = True)
                 experiments_df.to_csv(experimentsFileNameAndPath, header=True, index=False)
 
-
+            bar.update()
+            
             experiment_index = experiment_index + 1
         
             

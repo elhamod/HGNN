@@ -69,7 +69,6 @@ def get_conv(input_res, output_res, input_num_of_channels, intermediate_num_of_c
     res = input_res
     for i in range(num_of_layers):
         intermediate_output_res = get_output_res(res, kernel_size, stride, padding)
-        print(i, res, intermediate_output_res)
         assert(intermediate_output_res <= res)
         needed_downsampling_layers = needed_downsampling_layers + 1
         res = intermediate_output_res
@@ -131,7 +130,10 @@ def create_model(architecture, params):
     model = None
 
     if params["modelType"] != "basic_blackbox":
-        model = CNN_hierarchy(architecture, params)
+        if params["two_nets"] == False:
+            model = CNN_hierarchy(architecture, params)
+        else:
+            model = CNN_Two_Nets(architecture, params)
     else:  
         tl_model = params["tl_model"]
         fc_layers = params["fc_layers"]
@@ -149,7 +151,11 @@ def create_model(architecture, params):
     return model
 
 
-def getCustomTL_layer(tl_model, pretrained_model):
+# Gets a customized transfer learning model between two layers.
+# from_layer=None => from first layer. Otherwise, pass layer name
+# to_layer=None => to last layer. Otherwise, pass layer name
+# Returns [from_layer, to_layer). i.e. t_layer not included.
+def getCustomTL_layer(tl_model, pretrained_model, from_layer=None, to_layer=None):
     if tl_model == "NIN":
         output = torch.nn.Sequential()
         output.add_module("pretrained", pretrained_model)
@@ -165,18 +171,167 @@ def getCustomTL_layer(tl_model, pretrained_model):
               pretrained_model.layer3,
               pretrained_model.avgpool]
         else:
-            tl_model_subLayers = [pretrained_model.conv1,
-              pretrained_model.bn1,
-              pretrained_model.relu,
-              pretrained_model.maxpool,
-              pretrained_model.layer1,
-              pretrained_model.layer2,
-              pretrained_model.layer3,
-              pretrained_model.layer4,
-              pretrained_model.avgpool]
-        return torch.nn.Sequential(*tl_model_subLayers, Flatten())
+            # tl_model_subLayers = [pretrained_model.conv1,
+            #   pretrained_model.bn1,
+            #   pretrained_model.relu,
+            #   pretrained_model.maxpool,
+            #   pretrained_model.layer1,
+            #   pretrained_model.layer2,
+            #   pretrained_model.layer3,
+            #   pretrained_model.layer4,
+            #   pretrained_model.avgpool]
 
-# Build a Hierarchical convolutional Neural Network
+            # Get layers except for fc (last) one
+            tl_model_subLayer_names = list(dict(pretrained_model.named_children()).keys())[:-1]
+
+            # Get indices of from and to layers
+            from_layer_index = 0
+            to_layer_index = len(tl_model_subLayer_names)
+            if from_layer is not None:
+                try:
+                    from_layer_index = tl_model_subLayer_names.index(from_layer)
+                except:
+                    print(from_layer, "is not in", tl_model_subLayer_names)
+                    raise
+            if to_layer is not None:
+                try:
+                    to_layer_index = tl_model_subLayer_names.index(to_layer)
+                except:
+                    print(to_layer, "is not in", tl_model_subLayer_names)
+                    raise
+
+            children_layers = list(pretrained_model.children())
+            tl_model_subLayer_names_subset = tl_model_subLayer_names[from_layer_index:to_layer_index]
+            tl_model_subLayers = list(map(lambda x: children_layers[tl_model_subLayer_names.index(x)], tl_model_subLayer_names_subset))
+        return tl_model_subLayers
+
+def get_layer_by_name(model, layer_name):
+    model_subLayer_names = list(dict(model.named_children()).keys())[:-1]
+    children_layers = list(model.children())
+    return children_layers[model_subLayer_names.index(layer_name)]
+
+# Build a Hierarchical convolutional Neural Network with conv layers
+class CNN_Two_Nets(nn.Module):  
+    # Contructor
+    def __init__(self, architecture, params):
+        modelType = params["modelType"]
+        self.numberOfFine = architecture["fine"]
+        self.numberOfCoarse = architecture["coarse"] if not modelType=="DSN" else architecture["fine"]
+        tl_model = params["tl_model"]
+        link_layer = params["link_layer"]
+        fc_layers = params["fc_layers"]
+        
+        super(CNN_Two_Nets, self).__init__()
+
+        # The pretrained models
+        self.network_coarse, num_ftrs_coarse = create_pretrained_model(params)
+        self.network_fine, num_ftrs_fine = create_pretrained_model(params)
+        
+        # h_y block
+        self.h_y = torch.nn.Sequential(*getCustomTL_layer(tl_model, self.network_coarse, None, link_layer)) 
+
+        # g_c block
+        self.g_c = None
+        if modelType == "HGNNgcI":
+            # TODO: fix this case. broken because we need avg pooling from h_y
+            print("HGNNgcI case not supported yet")
+            raise 
+            self.g_c = [torch.nn.Identity()]
+        elif modelType != "HGNNgc0" and modelType != "BB":
+            self.g_c = getCustomTL_layer(tl_model, self.network_coarse, link_layer, None)
+        if self.g_c is not None:
+            self.g_c = torch.nn.Sequential(*self.g_c, Flatten())
+            self.g_c_fc = get_fc(num_ftrs_coarse, self.numberOfCoarse, num_of_layers=fc_layers)
+                    
+        # h_b block
+        self.h_b = None
+        if modelType == "HGNNhbI":
+            # TODO: To fix this case, we need img and hy to have same dimensions 
+            print("HGNNgcI case not supported yet")
+            raise 
+            self.h_b = torch.nn.Identity()
+        elif modelType != "DISCO" and modelType != "DSN" and modelType != "BB" :
+            self.h_b = torch.nn.Sequential(*getCustomTL_layer(tl_model, self.network_fine, None, link_layer))
+
+            
+        # g_y block
+        self.g_y = torch.nn.Sequential(*getCustomTL_layer(tl_model, self.network_fine, link_layer, None),  
+                                       Flatten())
+        self.g_y_fc = get_fc(num_ftrs_fine, self.numberOfFine, num_of_layers=fc_layers)
+
+        if torch.cuda.is_available():
+            self.g_y = self.g_y.cuda()
+            self.h_y = self.h_y.cuda()
+            self.g_y_fc = self.g_y_fc.cuda()
+            if self.g_c is not None:
+                self.g_c = self.g_c.cuda()
+                self.g_c_fc = self.g_c_fc.cuda()
+            if self.h_b is not None:
+                self.h_b = self.h_b.cuda()
+    
+    # Prediction
+    def forward(self, x):
+        activations = self.activations(x)
+        result = {
+            "fine": activations["fine"],
+            "coarse" : activations["coarse"]
+        }
+        return result
+
+
+    default_outputs = {
+        "fine": True,
+        "coarse" : True
+    }
+    def activations(self, x, outputs=default_outputs):        
+        hy_features = self.h_y(x)
+        
+        hb_hy_features = None
+        hb_features = None
+        self.cat_conv2d = None
+        if self.h_b is not None:
+            # concatenate hb and hy features and then cut the number of channels by 2
+            hb_features = self.h_b(x)
+            assert(hy_features.shape == hb_features.shape), "hb and hy activations should be of same size" 
+            assert(hb_features.shape[2] == hb_features.shape[3]), "hb/hy should be square-shaped"
+            hb_hy_features = torch.cat((hy_features, hb_features), 1)
+            resolution = hb_features.shape[2]
+            in_channels = hb_hy_features.shape[1]
+            self.cat_conv2d = get_conv(resolution, resolution, in_channels, in_channels, int(in_channels/2))
+            if torch.cuda.is_available():
+                self.cat_conv2d = self.cat_conv2d.cuda()
+            hb_hy_features =  self.cat_conv2d(hb_hy_features)
+        else:
+            hb_hy_features = hy_features
+
+        yc = None
+        gc_features = None
+        if outputs["coarse"] and self.g_c is not None:
+            gc_features = self.g_c(hy_features)
+            yc = self.g_c_fc(gc_features)
+        
+        y = None
+        gy_features = None
+        if outputs["fine"]:
+            gy_features = self.g_y(hb_hy_features)
+            y = self.g_y_fc(gy_features)
+            
+
+        activations = {
+            "input": x,
+            "hy_features": hy_features,
+            "hb_features": hb_features,
+            "gy_features": gy_features if outputs["fine"] else None,
+            "gc_features": gc_features if outputs["coarse"] else None,
+            "coarse": yc if outputs["coarse"] else None,
+            "fine": y if outputs["fine"] else None
+        }
+
+        return activations
+
+
+
+# Build a Hierarchical convolutional Neural Network with FC layers
 class CNN_hierarchy(nn.Module):
     
     # Contructor
@@ -192,7 +347,7 @@ class CNN_hierarchy(nn.Module):
 
         # The pretrained model
         self.pretrained_model, num_ftrs = create_pretrained_model(params)
-        self.custom_tl_layer = getCustomTL_layer(tl_model, self.pretrained_model)
+        self.custom_tl_layer = torch.nn.Sequential(*getCustomTL_layer(tl_model, self.pretrained_model), Flatten()) 
         
         # g_c block
         self.g_c = None
@@ -357,7 +512,8 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
             # Update the bar
             bar.set_postfix(val=row_information["validation_fine_f1"], 
                             train=row_information["training_fine_f1"],
-                            loss=row_information["training_loss"],)
+                            loss=row_information["training_loss"],
+                            min_loss=early_stopping.val_loss_min)
             bar.update()
 
             # early stopping
