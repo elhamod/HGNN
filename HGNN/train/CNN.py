@@ -220,6 +220,7 @@ class CNN_Two_Nets(nn.Module):
         tl_model = params["tl_model"]
         link_layer = params["link_layer"]
         fc_layers = params["fc_layers"]
+        img_res = params["img_res"]
         
         super(CNN_Two_Nets, self).__init__()
 
@@ -253,7 +254,21 @@ class CNN_Two_Nets(nn.Module):
         elif modelType != "DISCO" and modelType != "DSN" and modelType != "BB" :
             self.h_b = torch.nn.Sequential(*getCustomTL_layer(tl_model, self.network_fine, None, link_layer))
 
-            
+        # h_b + h_y -> g_y
+        self.cat_conv2d = None
+        if self.h_b is not None:
+            # concatenate hb and hy features and then cut the number of channels by 2
+            hb_features = self.h_b(torch.rand(1, 3, img_res, img_res))
+            hy_features = self.h_y(torch.rand(1, 3, img_res, img_res))
+            assert(hy_features.shape == hb_features.shape), "hb and hy activations should be of same size" 
+            assert(hb_features.shape[2] == hb_features.shape[3]), "hb/hy should be square-shaped"
+            hb_hy_features = torch.cat((hy_features, hb_features), 1)
+            resolution = hb_features.shape[2]
+            in_channels = hb_hy_features.shape[1]
+            self.cat_conv2d = get_conv(resolution, resolution, in_channels, in_channels, int(in_channels/2))
+            if torch.cuda.is_available():
+                self.cat_conv2d = self.cat_conv2d.cuda()
+
         # g_y block
         self.g_y = torch.nn.Sequential(*getCustomTL_layer(tl_model, self.network_fine, link_layer, None),  
                                        Flatten())
@@ -288,18 +303,9 @@ class CNN_Two_Nets(nn.Module):
         
         hb_hy_features = None
         hb_features = None
-        self.cat_conv2d = None
         if self.h_b is not None:
-            # concatenate hb and hy features and then cut the number of channels by 2
             hb_features = self.h_b(x)
-            assert(hy_features.shape == hb_features.shape), "hb and hy activations should be of same size" 
-            assert(hb_features.shape[2] == hb_features.shape[3]), "hb/hy should be square-shaped"
             hb_hy_features = torch.cat((hy_features, hb_features), 1)
-            resolution = hb_features.shape[2]
-            in_channels = hb_hy_features.shape[1]
-            self.cat_conv2d = get_conv(resolution, resolution, in_channels, in_channels, int(in_channels/2))
-            if torch.cuda.is_available():
-                self.cat_conv2d = self.cat_conv2d.cuda()
             hb_hy_features =  self.cat_conv2d(hb_hy_features)
         else:
             hb_hy_features = hy_features
@@ -512,8 +518,8 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
             # Update the bar
             bar.set_postfix(val=row_information["validation_fine_f1"], 
                             train=row_information["training_fine_f1"],
-                            loss=row_information["training_loss"],
-                            min_loss=early_stopping.val_loss_min)
+                            val_loss=row_information["validation_loss"],
+                            min_val_loss=early_stopping.val_loss_min)
             bar.update()
 
             # early stopping
@@ -556,7 +562,9 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
 
 # loads a saved model along with its results
 def loadModel(model, savedModelName):
-    model.load_state_dict(torch.load(os.path.join(savedModelName, modelFinalCheckpoint))) 
+    model.load_state_dict(torch.load(os.path.join(savedModelName, modelFinalCheckpoint), map_location=torch.device('cpu'))) 
+    if torch.cuda.is_available():
+        model.cuda()
     model.eval()
 
     time_elapsed = 0
