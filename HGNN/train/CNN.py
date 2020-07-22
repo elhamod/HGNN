@@ -215,6 +215,7 @@ class CNN_Two_Nets(nn.Module):
     # Contructor
     def __init__(self, architecture, params):
         modelType = params["modelType"]
+        self.modelType = modelType
         self.numberOfFine = architecture["fine"]
         self.numberOfCoarse = architecture["coarse"] if not modelType=="DSN" else architecture["fine"]
         tl_model = params["tl_model"]
@@ -298,7 +299,7 @@ class CNN_Two_Nets(nn.Module):
         "fine": True,
         "coarse" : True
     }
-    def activations(self, x, outputs=default_outputs):        
+    def activations(self, x, outputs=default_outputs):     
         hy_features = self.h_y(x)
         
         hb_hy_features = None
@@ -323,13 +324,15 @@ class CNN_Two_Nets(nn.Module):
             y = self.g_y_fc(gy_features)
             
 
+        modelType_has_coarse = gc_features is not None and (self.modelType!="DSN")  
+
         activations = {
             "input": x,
             "hy_features": hy_features,
             "hb_features": hb_features,
             "gy_features": gy_features if outputs["fine"] else None,
             "gc_features": gc_features if outputs["coarse"] else None,
-            "coarse": yc if outputs["coarse"] else None,
+            "coarse": yc if outputs["coarse"] and modelType_has_coarse else None,
             "fine": y if outputs["fine"] else None
         }
 
@@ -466,10 +469,13 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
 
     print("Training started...")
     start = time.time()
+    criterion = nn.CrossEntropyLoss()
+    if torch.cuda.is_available():
+        criterion = criterion.cuda()
+
     with tqdm(total=n_epochs, desc="iteration") as bar:
         epochs = 0
         for epoch in range(n_epochs):
-            criterion = nn.CrossEntropyLoss()
             model.train()
             for batch in train_loader:
                 optimizer.zero_grad()
@@ -678,6 +684,7 @@ def get_distance_from_example(dataset, example_1, model, params):
         if not isOldBlackbox:
             z_1 = z_1['fine']
         z_1 = z_1.detach()
+        z_1 = torch.nn.Softmax(dim=1)(z_1)
         for j in range(dataset_size):
             example_2 = dataset[j]
             z_2 = applyModel(example_2["image"].unsqueeze(0), model)
@@ -686,6 +693,8 @@ def get_distance_from_example(dataset, example_1, model, params):
                 z_2 = z_2['fine']
 
             z_2 = z_2.detach()
+            z_2 = torch.nn.Softmax(dim=1)(z_2)
+
             loss = criterion(z_1, z_2)
 
 

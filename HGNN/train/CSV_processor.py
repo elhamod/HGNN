@@ -26,22 +26,41 @@ fine_csv_usedColumns = [fine_csv_fileName_header,
 # subpath of where images can be found.
 image_subpath = "images"
 
-max_number_of_augmented_images = 100 # TODO make this a params argument
-
 # Loads, processes, cleans up and analyise fish metadata
 class CSV_processor:
-    def __init__(self, data_root, suffix, augmentation_enabled=False, imageDimension=None, verbose=False):
+    def __init__(self, data_root, suffix, data_path, params, verbose=False):
         self.data_root = data_root
         self.suffix = suffix
-        self.augmentation_enabled = augmentation_enabled
-        self.imageDimension = imageDimension
+        self.augmentation_enabled = params['augmented']
+        self.aug_profile = params['aug_profile']
+        self.imageDimension = params['img_res']
         self.image_subpath = image_subpath
         self.fine_csv = None
         self.samples = []
         self.filesPerFine_table = None
         self.filesPerFamilyAndGenis_table = None
         self.fileName_to_index = {}
-        
+
+        # get number of augmented images
+        if self.augmentation_enabled:
+            if self.aug_profile is not None:
+                try:
+                    aug_file_df = pd.read_csv(os.path.join(data_path, 'aug_params.csv'))
+                    aug_file_df = aug_file_df.loc[((aug_file_df['aug_profile'] == self.aug_profile) & 
+                                (aug_file_df['img_res'] == self.imageDimension) &
+                                (aug_file_df['suffix'] ==self.suffix))]
+                    aug_file_df['image_path_match'] = aug_file_df['image_path'].apply(lambda x: os.path.join(data_path, x) == self.data_root)
+                    aug_file_df = aug_file_df.loc[aug_file_df['image_path_match'] == True]
+                    self.max_number_of_augmented_images =aug_file_df['numOfAugmentedVersions'].item()
+                except:
+                    print("could not read aug_params.csv")
+                    print(aug_file_df)
+                    raise
+            # else:
+                # print("aug_profile can't be None when augmentation is enabled")
+                # raise
+
+
         self.get_csv_file()
         self.cleanup_csv_file()
         self.save_csv_file()
@@ -126,6 +145,7 @@ class CSV_processor:
         fileNames2 = self.fine_csv.index.values.tolist()
         fileNames = [value for value in fileNames1 if value in fileNames2]
         FoundFileNames = []
+        profile_name_string = ("_" + self.aug_profile) if self.aug_profile is not None else ""
         with tqdm(total=len(fileNames), desc="Loading images") as bar:
             for fileName in fileNames:
                 try:
@@ -150,8 +170,8 @@ class CSV_processor:
                     original.load()
                     images.append(original)
                     if self.augmentation_enabled and self.imageDimension is not None:
-                        for k in range(max_number_of_augmented_images):
-                            file = os.path.join(img_full_path, prefix+"_"+str(self.imageDimension)+"_aug"+str(k)+ext)
+                        for k in range(self.max_number_of_augmented_images):
+                            file = os.path.join(img_full_path, prefix+"_"+str(self.imageDimension)+"_aug"+str(k)+profile_name_string+ext)
                         #for file in glob.glob(os.path.join(img_full_path, prefix+"_"+str(self.imageDimension)+"_aug*"+ext)): # glob is very slow.
                             if os.path.exists(file):
                                 bar.set_postfix(fileName=file) 

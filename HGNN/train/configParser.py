@@ -8,17 +8,22 @@ import pandas as pd
     
 #TODO: All experiments wit datasplit params having augmented should have it removed.
 # This is because being augmented should have same split if it is not augmented.
-def getDatasetParams(params):
-    return {
+def getDatasetParams(params, with_aug = False):
+    result = {
         "training_count": params["training_count"],
         "validation_count": params["validation_count"],
         "image_path": params["image_path"],
         "suffix": params['suffix'],
-        # "augmented": params['augmented'],
     }
+    if with_aug:
+        result = {**result, **{
+            "augmented": params['augmented'],
+            "aug_profile": params['aug_profile'],       
+        }}
+    return result
     
-def getDatasetName(params):
-    datasetName = str(getDatasetParams(params))
+def getDatasetName(params, with_aug = False):
+    datasetName = str(getDatasetParams(params, with_aug))
     datasetName = hashlib.sha224(datasetName.encode('utf-8')).hexdigest()
     
     return os.path.join('datasplits',datasetName)
@@ -172,5 +177,6 @@ class ConfigParser:
         params["two_nets"] = params["two_nets"] if ("two_nets" in params) else False
         params["link_layer"] = params["link_layer"] if ("link_layer" in params) else "layer1"
         params["dataset_norm"] = params["dataset_norm"] if ("dataset_norm" in params) else False
+        params["aug_profile"] = params["aug_profile"] if ("aug_profile" in params) else None
         
         return params

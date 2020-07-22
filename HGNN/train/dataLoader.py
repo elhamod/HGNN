@@ -18,18 +18,17 @@ from random import randrange
 
 from .configParser import getDatasetName, getDatasetParams
 from .CSV_processor import CSV_processor
-from myhelpers.dataset_normalization import dataset_normalization
 
 
 testIndexFileName = "testIndex.csv"
 valIndexFileName = "valIndex.csv"
 trainingIndexFileName = "trainingIndex.csv"
 paramsFileName="params.json"
-
+normalizationFileName="normalization_params.json"
 
 
 class FishDataset(Dataset):
-    def __init__(self, params, verbose=False):
+    def __init__(self, params, data_path, verbose=False):
         self.transformedSamples = {} # caches the transformed samples to speed training up
         self.imageDimension = params["img_res"] # if None, CSV_processor will load original images
         self.n_channels = 3
@@ -37,6 +36,7 @@ class FishDataset(Dataset):
         self.augmentation_enabled = params["augmented"]
         self.normalizeFromResnet = not params["dataset_norm"]
         self.normalization_enabled = True
+        self.pad = True
         self.normalizer = None
         self.composedTransforms = None
         
@@ -45,25 +45,34 @@ class FishDataset(Dataset):
             os.makedirs(data_root_suffix)
         
 
-        self.csv_processor = CSV_processor(self.data_root, self.suffix, self.augmentation_enabled, self.imageDimension)
-        
-        # Create transfroms
+        self.csv_processor = CSV_processor(self.data_root, self.suffix, data_path, params)
+
+    def getNormalizer(self):
         if self.normalizer is None:
             if self.normalizeFromResnet:
                 self.normalizer = [transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                 std=[0.229, 0.224, 0.225])]
             else:
-                augmentation, normalization = self.toggle_image_loading(augmentation=False, normalization=False)
-                self.normalizer = dataset_normalization(self).getTransform()
-                self.toggle_image_loading(augmentation, normalization)
-    
+                fullNormalizationFileName = os.path.join(self.data_root, self.suffix, normalizationFileName)
+                try:
+                    with open(fullNormalizationFileName, 'rb') as f:
+                        j = json.loads(f.read())
+                except:
+                    print("Could not open normalization file", fullNormalizationFileName)
+                    raise
+                self.normalizer = [transforms.Normalize(mean=j['mean'],
+                            std=j['std'])]
+        
+        return self.normalizer
+
     def getTransforms(self):
         transformsList = [#transforms.ToPILImage(),
-              transforms.Lambda(self.MakeSquared),
-              transforms.ToTensor()]
+            transforms.Lambda(self.MakeSquared)]
+        
+        transformsList = transformsList + [transforms.ToTensor()]
               
         if self.normalization_enabled:
-            transformsList = transformsList + self.normalizer
+            transformsList = transformsList + self.getNormalizer()
         return transformsList
        
 
@@ -71,11 +80,12 @@ class FishDataset(Dataset):
         return len(self.csv_processor.samples)
 
     
-    # Toggles whether loaded images are normalized. augmentation is for future use.
-    def toggle_image_loading(self, augmentation, normalization):
-        old = (self.augmentation_enabled, self.normalization_enabled)
-        self.augmentation_enabled = augmentation
-        self.normalization_enabled = normalization
+    # Toggles whether loaded images are normalized, squared, or augmented
+    def toggle_image_loading(self, augmentation=None, normalization=None, pad=None):
+        old = (self.augmentation_enabled, self.normalization_enabled, self.pad)
+        self.augmentation_enabled = augmentation if augmentation is not None else self.augmentation_enabled
+        self.normalization_enabled = normalization if normalization is not None else self.normalization_enabled
+        self.pad = pad if pad is not None else self.pad
         self.composedTransforms = None
         return old
     
@@ -114,20 +124,23 @@ class FishDataset(Dataset):
             img = transforms.functional.resize(img, (imageDimension, new_smaller_dimension))
 
         # pad
-        diff = imageDimension - new_smaller_dimension
-        pad_1 = int(diff/2)
-        pad_2 = diff - pad_1
-        if self.normalizeFromResnet:
-            RGBmean = [0.485*255, 0.456*255, 0.406*255]
+        if self.pad:
+            diff = imageDimension - new_smaller_dimension
+            pad_1 = int(diff/2)
+            pad_2 = diff - pad_1
+            if self.normalizeFromResnet:
+                RGBmean = [0.485*255, 0.456*255, 0.406*255]
+                fill = tuple([round(x) for x in RGBmean])
+            else:
+                # stat = ImageStat.Stat(img)
+                normalizer = self.getNormalizer()
+                RGBmean = [normalizer[0].mean[0]*255, normalizer[0].mean[1]*255, normalizer[0].mean[2]*255]
             fill = tuple([round(x) for x in RGBmean])
-        else:
-            stat = ImageStat.Stat(img)
-            fill = tuple([round(x) for x in stat.mean])
 
-        if smaller_dimension == 0:
-            img = transforms.functional.pad(img, (pad_1, 0, pad_2, 0), padding_mode='constant', fill = fill)
-        else:
-            img = transforms.functional.pad(img, (0, pad_1, 0, pad_2), padding_mode='constant', fill = fill)
+            if smaller_dimension == 0:
+                img = transforms.functional.pad(img, (pad_1, 0, pad_2, 0), padding_mode='constant', fill = fill)
+            else:
+                img = transforms.functional.pad(img, (0, pad_1, 0, pad_2), padding_mode='constant', fill = fill)
 
         return img
     
@@ -139,7 +152,7 @@ class FishDataset(Dataset):
         # Cache transformed images
         if self.composedTransforms is None:
             self.composedTransforms = transforms.Compose(self.getTransforms())
-        hashString = str(self.augmentation_enabled) + str(self.normalization_enabled)
+        hashString = str(self.augmentation_enabled) + str(self.normalization_enabled) + str(self.pad)
         transformHash = hashlib.sha224(hashString.encode('utf-8')).hexdigest()
             
         if transformHash not in self.transformedSamples:
@@ -147,7 +160,7 @@ class FishDataset(Dataset):
 
         imageList = self.transformedSamples[transformHash][idx]
         numOfImages = len(imageList)
-        image = imageList[randrange(numOfImages)]     
+        image = imageList[randrange(numOfImages)] 
                
         fileName = self.csv_processor.samples[idx]['fileName']
 #         matchFamily = self.csv_processor.samples[idx]['family']
@@ -209,14 +222,16 @@ def getParams(params):
     return data_root, suffix
     
 class datasetManager:
-    def __init__(self, experimentName, verbose=False):
+    def __init__(self, experimentName, data_path, verbose=False):
         self.verbose = verbose
         self.suffix = None
         self.data_root = None
         self.experimentName = experimentName
         self.datasetName = None
+        self.datasetName_withaug = None
         self.loader_indices = []
         self.params = None
+        self.data_path = data_path
         self.reset()
     
     def reset(self):
@@ -227,23 +242,24 @@ class datasetManager:
         
     
     def updateParams(self, params):
-        params_copy = copy.copy(params)
-        self_params_copy = copy.copy(self.params)
+        self.params = params
 
         datasetName = getDatasetName(params)
+        datasetName_withaug = getDatasetName(params, True)
         if datasetName != self.datasetName:
-            self.reset()
-            self.params = params
+            self.datasetName = datasetName
             self.data_root, self.suffix = getParams(params)
+            self.loader_indices = []
             self.experiment_folder_name = os.path.join(self.data_root, self.suffix, self.experimentName)
             self.dataset_folder_name = os.path.join(self.experiment_folder_name, datasetName)
-            self.datasetName = datasetName
-            self.loader_indices = []
+        if datasetName_withaug != self.datasetName_withaug:
+            self.reset()
+            self.datasetName_withaug = datasetName_withaug
         
     def getDataset(self):
         if self.dataset is None:
             print("Creating dataset...")
-            self.dataset = FishDataset(self.params, self.verbose)
+            self.dataset = FishDataset(self.params, self.data_path, self.verbose)
             print("Creating dataset... Done.")
         return self.dataset
 
@@ -266,22 +282,22 @@ class datasetManager:
                 
                 indices_len = len(self.dataset)
                 data_loader = torch.utils.data.DataLoader(self.dataset,
-                                            batch_size=indices_len,
+                                            batch_size=batchSize,
                                             shuffle=False)
-                data_loader_batch = next(iter(data_loader))
-                indices = range(indices_len)
-                labels = data_loader_batch['fine']
+                labels=None
+                for batch in data_loader:
+                    if labels is None:
+                        labels = batch['fine']
+                    else:
+                        labels = torch.cat((labels, batch['fine']), 0)
                 if torch.cuda.is_available():
                     labels = labels.cpu() 
+                indices = range(indices_len)
                 train_indices, test_indices = train_test_split(indices, test_size= 1-training_count-validation_count, 
                                                             stratify=labels.cpu())
 
                 print("train/test = ", len(train_indices),len(test_indices))
-                data_loader = torch.utils.data.DataLoader(self.dataset,
-                                            batch_size=indices_len,
-                                            shuffle=False)
-                data_loader_batch = next(iter(data_loader))
-                labels_sub = data_loader_batch['fine'][train_indices]
+                labels_sub = labels[train_indices]
                 if torch.cuda.is_available():
                     labels_sub = labels_sub.cpu() 
                 train_indices, val_indices = train_test_split(train_indices, test_size= validation_count/(validation_count+training_count), 
