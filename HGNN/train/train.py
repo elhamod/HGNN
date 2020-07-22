@@ -34,7 +34,7 @@ def main(cuda, experimentsPath, dataPath, experimentName):
     experimentsFileNameAndPath = os.path.join(experimentsPath, experimetnsFileName)
     
     # load data
-    datasetManager = dataLoader.datasetManager(experimentPathAndName)
+    datasetManager = dataLoader.datasetManager(experimentPathAndName, dataPath)
     
     paramsIterator = config_parser.getExperiments()  
     number_of_experiments = sum(1 for e in paramsIterator)  
