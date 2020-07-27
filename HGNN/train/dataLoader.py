@@ -27,6 +27,10 @@ paramsFileName="params.json"
 normalizationFileName="normalization_params.json"
 
 
+# sets whether to pre-load (time efficient) pr post-load(memory efficient)
+memory_efficient = False # default False.
+
+
 class FishDataset(Dataset):
     def __init__(self, params, data_path, verbose=False):
         self.transformedSamples = {} # caches the transformed samples to speed training up
@@ -117,6 +121,7 @@ class FishDataset(Dataset):
         # Resize
         smaller_dimension = 0 if img_H < img_W else 1
         larger_dimension = 1 if img_H < img_W else 0
+        if imageDimension != img_H or imageDimension != img_W:
         new_smaller_dimension = int(imageDimension * img.size[smaller_dimension] / img.size[larger_dimension])
         if smaller_dimension == 1:
             img = transforms.functional.resize(img, (new_smaller_dimension, imageDimension))
@@ -152,15 +157,24 @@ class FishDataset(Dataset):
         # Cache transformed images
         if self.composedTransforms is None:
             self.composedTransforms = transforms.Compose(self.getTransforms())
-        hashString = str(self.augmentation_enabled) + str(self.normalization_enabled) + str(self.pad)
-        transformHash = hashlib.sha224(hashString.encode('utf-8')).hexdigest()
-            
-        if transformHash not in self.transformedSamples:
-            self.createTransformedSamples(transformHash)
+        
+        # Cache transformed images
+        if not memory_efficient:
+            hashString = str(self.augmentation_enabled) + str(self.normalization_enabled) + str(self.pad)
+            transformHash = hashlib.sha224(hashString.encode('utf-8')).hexdigest()
+                
+            if transformHash not in self.transformedSamples:
+                self.createTransformedSamples(transformHash)
 
-        imageList = self.transformedSamples[transformHash][idx]
-        numOfImages = len(imageList)
-        image = imageList[randrange(numOfImages)] 
+            imageList = self.transformedSamples[transformHash][idx]
+            numOfImages = len(imageList)
+            image = imageList[randrange(numOfImages)] 
+        else:
+            imageList = self.csv_processor.samples[idx]['images']
+            numOfImages = len(imageList)
+            image = imageList[randrange(numOfImages)]
+            image = self.composedTransforms(image)
+         
                
         fileName = self.csv_processor.samples[idx]['fileName']
 #         matchFamily = self.csv_processor.samples[idx]['family']

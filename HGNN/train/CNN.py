@@ -258,17 +258,18 @@ class CNN_Two_Nets(nn.Module):
         # h_b + h_y -> g_y
         self.cat_conv2d = None
         if self.h_b is not None:
-            # concatenate hb and hy features and then cut the number of channels by 2
-            hb_features = self.h_b(torch.rand(1, 3, img_res, img_res))
-            hy_features = self.h_y(torch.rand(1, 3, img_res, img_res))
-            assert(hy_features.shape == hb_features.shape), "hb and hy activations should be of same size" 
-            assert(hb_features.shape[2] == hb_features.shape[3]), "hb/hy should be square-shaped"
-            hb_hy_features = torch.cat((hy_features, hb_features), 1)
-            resolution = hb_features.shape[2]
-            in_channels = hb_hy_features.shape[1]
-            self.cat_conv2d = get_conv(resolution, resolution, in_channels, in_channels, int(in_channels/2))
-            if torch.cuda.is_available():
-                self.cat_conv2d = self.cat_conv2d.cuda()
+            if modelType == "HGNN":
+                # concatenate hb and hy features and then cut the number of channels by 2
+                hb_features = self.h_b(torch.rand(1, 3, img_res, img_res))
+                hy_features = self.h_y(torch.rand(1, 3, img_res, img_res))
+                assert(hy_features.shape == hb_features.shape), "hb and hy activations should be of same size" 
+                assert(hb_features.shape[2] == hb_features.shape[3]), "hb/hy should be square-shaped"
+                hb_hy_features = torch.cat((hy_features, hb_features), 1)
+                resolution = hb_features.shape[2]
+                in_channels = hb_hy_features.shape[1]
+                self.cat_conv2d = get_conv(resolution, resolution, in_channels, in_channels, int(in_channels/2))
+                if torch.cuda.is_available():
+                    self.cat_conv2d = self.cat_conv2d.cuda()
 
         # g_y block
         self.g_y = torch.nn.Sequential(*getCustomTL_layer(tl_model, self.network_fine, link_layer, None),  
@@ -306,8 +307,14 @@ class CNN_Two_Nets(nn.Module):
         hb_features = None
         if self.h_b is not None:
             hb_features = self.h_b(x)
-            hb_hy_features = torch.cat((hy_features, hb_features), 1)
-            hb_hy_features =  self.cat_conv2d(hb_hy_features)
+            if self.modelType == "HGNN":
+                hb_hy_features = torch.cat((hy_features, hb_features), 1)
+                hb_hy_features =  self.cat_conv2d(hb_hy_features)
+            elif self.modelType == "HGNN_cat":
+                hb_hy_features = torch.cat((hy_features, hb_features), 2)
+            else:
+                hb_hy_features = hy_features + hb_features
+
         else:
             hb_hy_features = hy_features
 
