@@ -38,7 +38,6 @@ class FishDataset(Dataset):
         self.n_channels = 3
         self.data_root, self.suffix  = getParams(params)
         self.augmentation_enabled = params["augmented"]
-        self.normalizeFromResnet = not params["dataset_norm"]
         self.normalization_enabled = True
         self.pad = True
         self.normalizer = None
@@ -53,19 +52,15 @@ class FishDataset(Dataset):
 
     def getNormalizer(self):
         if self.normalizer is None:
-            if self.normalizeFromResnet:
-                self.normalizer = [transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                std=[0.229, 0.224, 0.225])]
-            else:
-                fullNormalizationFileName = os.path.join(self.data_root, self.suffix, normalizationFileName)
-                try:
-                    with open(fullNormalizationFileName, 'rb') as f:
-                        j = json.loads(f.read())
-                except:
-                    print("Could not open normalization file", fullNormalizationFileName)
-                    raise
-                self.normalizer = [transforms.Normalize(mean=j['mean'],
-                            std=j['std'])]
+            fullNormalizationFileName = os.path.join(self.data_root, self.suffix, normalizationFileName)
+            try:
+                with open(fullNormalizationFileName, 'rb') as f:
+                    j = json.loads(f.read())
+            except:
+                print("Could not open normalization file", fullNormalizationFileName)
+                raise
+            self.normalizer = [transforms.Normalize(mean=j['mean'],
+                        std=j['std'])]
         
         return self.normalizer
 
@@ -133,13 +128,9 @@ class FishDataset(Dataset):
             diff = imageDimension - new_smaller_dimension
             pad_1 = int(diff/2)
             pad_2 = diff - pad_1
-            if self.normalizeFromResnet:
-                RGBmean = [0.485*255, 0.456*255, 0.406*255]
-                fill = tuple([round(x) for x in RGBmean])
-            else:
-                # stat = ImageStat.Stat(img)
-                normalizer = self.getNormalizer()
-                RGBmean = [normalizer[0].mean[0]*255, normalizer[0].mean[1]*255, normalizer[0].mean[2]*255]
+            # stat = ImageStat.Stat(img)
+            normalizer = self.getNormalizer()
+            RGBmean = [normalizer[0].mean[0]*255, normalizer[0].mean[1]*255, normalizer[0].mean[2]*255]
             fill = tuple([round(x) for x in RGBmean])
 
             if smaller_dimension == 0:

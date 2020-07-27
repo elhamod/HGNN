@@ -101,23 +101,18 @@ def get_conv(input_res, output_res, input_num_of_channels, intermediate_num_of_c
 
 def create_pretrained_model(params):
     tl_model = params["tl_model"]
-    tl_freeze = params["tl_freeze"]
-    pretrained = params["pretrained"]
+    tl_freeze = False
     
     if tl_model == "NIN":
-        model = nin_cifar100(pretrained=pretrained)
+        model = nin_cifar100(pretrained=True)
     elif tl_model == "CIFAR":
-        model = cifar_resnet56(pretrained='cifar100' if pretrained else False)
+        model = cifar_resnet56(pretrained='cifar100')
     elif tl_model == "ResNet18":
-        model = models.resnet18(pretrained=pretrained)
+        model = models.resnet18(pretrained=True)
     elif tl_model == "ResNet50":
-        model = models.resnet50(pretrained=pretrained)
+        model = models.resnet50(pretrained=True)
     else:
         raise Exception('Unknown network type')
-        
-    if tl_freeze:
-        for param in model.parameters():
-            param.requires_grad = False
         
     if tl_model != "NIN":
         num_ftrs = model.fc.in_features
@@ -130,10 +125,7 @@ def create_model(architecture, params):
     model = None
 
     if params["modelType"] != "basic_blackbox":
-        if params["two_nets"] == False:
-            model = CNN_hierarchy(architecture, params)
-        else:
-            model = CNN_Two_Nets(architecture, params)
+        model = CNN_Two_Nets(architecture, params)
     else:  
         tl_model = params["tl_model"]
         fc_layers = params["fc_layers"]
@@ -346,120 +338,19 @@ class CNN_Two_Nets(nn.Module):
         return activations
 
 
-
-# Build a Hierarchical convolutional Neural Network with FC layers
-class CNN_hierarchy(nn.Module):
-    
-    # Contructor
-    def __init__(self, architecture, params):
-        modelType = params["modelType"]
-        self.numberOfFine = architecture["fine"]
-        self.numberOfCoarse = architecture["coarse"] if not modelType=="DSN" else architecture["fine"]
-        fc_width = params["fc_width"]
-        fc_layers = params["fc_layers"]
-        tl_model = params["tl_model"]
-        
-        super(CNN_hierarchy, self).__init__()
-
-        # The pretrained model
-        self.pretrained_model, num_ftrs = create_pretrained_model(params)
-        self.custom_tl_layer = torch.nn.Sequential(*getCustomTL_layer(tl_model, self.pretrained_model), Flatten()) 
-        
-        # g_c block
-        self.g_c = None
-        g_c_num_ftrs = fc_width
-        if modelType == "HGNNgcI":
-            self.g_c = torch.nn.Identity()
-        elif modelType != "HGNNgc0" and modelType != "BB":
-            self.g_c = get_fc(fc_width, self.numberOfCoarse, num_of_layers=fc_layers)
-            g_c_num_ftrs = self.numberOfCoarse
-        
-        # h_y block
-        self.h_y = get_fc(num_ftrs, fc_width, num_of_layers=fc_layers)            
-            
-        # h_b block
-        h_b_num_ftrs = 0
-        self.h_b = None
-        if modelType == "HGNNhbI":
-            self.h_b = torch.nn.Identity()
-            h_b_num_ftrs = num_ftrs
-        elif modelType != "DISCO" and modelType != "DSN" and modelType != "BB" :
-            self.h_b = get_fc(num_ftrs, fc_width, num_of_layers=fc_layers)
-            h_b_num_ftrs = fc_width
-
-            
-        # g_y block
-        self.g_y = get_fc(fc_width + h_b_num_ftrs, self.numberOfFine, num_of_layers=fc_layers)
-
-        if torch.cuda.is_available():
-            self.custom_tl_layer = self.custom_tl_layer.cuda()
-            self.g_y = self.g_y.cuda()
-            self.h_y = self.h_y.cuda()
-            if self.g_c is not None:
-                self.g_c = self.g_c.cuda()
-            if self.h_b is not None:
-                self.h_b = self.h_b.cuda()
-    
-    # Prediction
-    def forward(self, x):
-        activations = self.activations(x)
-        result = {
-            "fine": activations["fine"],
-            "coarse" : activations["coarse"]
-        }
-        return result
-
-
-    default_outputs = {
-        "fine": True,
-        "coarse" : True
-    }
-    def activations(self, x, outputs=default_outputs):
-        tl_features = self.custom_tl_layer(x)
-        
-        hy_features = self.h_y(tl_features)
-        
-        hb_hy_features = None
-        hb_features = None
-        if self.h_b is not None:
-            hb_features = self.h_b(tl_features)
-            hb_hy_features = torch.cat((hy_features, hb_features), 1)
-        else:
-            hb_hy_features = hy_features
-            
-        yc = None
-        if outputs["coarse"] and self.g_c is not None:
-            yc = self.g_c(hy_features)
-        
-        species = None
-        if outputs["fine"]:
-            y = self.g_y(hb_hy_features)
-            
-
-        activations = {
-            "input": x,
-            "tl_features": tl_features,
-            "hy_features": hy_features,
-            "hb_features": hb_features,
-            "coarse": yc if outputs["coarse"] else None,
-            "fine": y if outputs["fine"] else None
-        }
-
-        return activations
-
 def getModelFile(experimentName):
     return os.path.join(experimentName, modelFinalCheckpoint)
 
 
 def trainModel(train_loader, validation_loader, params, model, savedModelName, test_loader=None):  
-    n_epochs = params["n_epochs"]
-    patience = params["patience"]
+    n_epochs = 500
+    patience = 10
     learning_rate = params["learning_rate"]
     modelType = params["modelType"]
     batchSize = params["batchSize"]
     unsupervisedOnTest = params["unsupervisedOnTest"]
     lambda_ = params["lambda"]
-    weight_decay = params["weight_decay"]
+    weight_decay = 0.0001
     isOldBlackbox = (modelType == "basic_blackbox")
     isBlackbox = (modelType == "BB")
     isDSN = (modelType == "DSN")
