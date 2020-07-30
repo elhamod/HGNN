@@ -31,6 +31,8 @@ epochsFileName = "epochs.csv"
 
 paramsFileName="params.json"
 
+detailed_reporting = False
+
 
 class ZeroModule(Module):
     def __init__(self, *args, **kwargs):
@@ -347,7 +349,6 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     patience = 5
     learning_rate = params["learning_rate"]
     modelType = params["modelType"]
-    batchSize = params["batchSize"]
     unsupervisedOnTest = params["unsupervisedOnTest"]
     lambda_ = params["lambda"]
     weight_decay = 0.0001
@@ -418,15 +419,15 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
             row_information = {
                 'validation_fine_f1': getLoader_f1(validation_loader, model, params),
                 'training_fine_f1': getLoader_f1(train_loader, model, params),
-                'test_fine_f1': getLoader_f1(test_loader, model, params) if test_loader else None,
+                'test_fine_f1': getLoader_f1(test_loader, model, params) if test_loader and detailed_reporting else None,
                 'validation_loss': getCrossEntropyFromLoader(validation_loader, model, params),
-                'training_loss': getCrossEntropyFromLoader(train_loader, model, params),
+                'training_loss': getCrossEntropyFromLoader(train_loader, model, params) if detailed_reporting else None,
 
-                'training_coarse_loss': getCrossEntropyFromLoader(train_loader, model, params, "coarse") if not isOldBlackbox and not isDSN and not isBlackbox else None,
-                'validation_coarse_loss': getCrossEntropyFromLoader(validation_loader, model, params, "coarse") if not isOldBlackbox and not isDSN and not isBlackbox else None,
-                'training_coarse_f1': getLoader_f1(train_loader, model, params, "coarse") if not isDSN else None,
-                'validation_coarse_f1': getLoader_f1(validation_loader, model, params, "coarse")if not isDSN else None,
-                'test_coarse_f1': getLoader_f1(test_loader, model, params, "coarse") if test_loader and not isDSN else None,
+                'training_coarse_loss': getCrossEntropyFromLoader(train_loader, model, params, "coarse") if not isOldBlackbox and not isDSN and not isBlackbox and detailed_reporting else None,
+                'validation_coarse_loss': getCrossEntropyFromLoader(validation_loader, model, params, "coarse") if not isOldBlackbox and not isDSN and not isBlackbox and detailed_reporting else None,
+                'training_coarse_f1': getLoader_f1(train_loader, model, params, "coarse") if not isDSN and detailed_reporting else None,
+                'validation_coarse_f1': getLoader_f1(validation_loader, model, params, "coarse")if not isDSN and detailed_reporting else None,
+                'test_coarse_f1': getLoader_f1(test_loader, model, params, "coarse") if test_loader and not isDSN and detailed_reporting else None,
             }
             
             df = df.append(pd.DataFrame(row_information, index=[0]), ignore_index = True)

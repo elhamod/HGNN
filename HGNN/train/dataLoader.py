@@ -7,6 +7,7 @@ from tqdm import tqdm
 import random
 import json
 import torchvision
+
 from myhelpers.dataset_normalization import dataset_normalization
 from myhelpers.color_PCA import Color_PCA
 
@@ -14,7 +15,8 @@ from .configParser import getDatasetName
 from .CSV_processor import CSV_processor
 
 
-num_of_workers = 4
+
+num_of_workers = 8
 
 class FishDataset(Dataset):
     def __init__(self, type_, params, data_path, normalizer, color_pca, csv_processor, verbose=False):
@@ -36,8 +38,7 @@ class FishDataset(Dataset):
             self.normalizer = normalizer
         else:
             self.normalizer = dataset_normalization(data_root_suffix, self.dataset, res=params['img_res']).getTransform()[0]
-        self.RGBmean = [self.normalizer.mean[0]*255, self.normalizer.mean[1]*255, self.normalizer.mean[2]*255]
-
+        self.RGBmean = [round(self.normalizer.mean[0]*255), round(self.normalizer.mean[1]*255), round(self.normalizer.mean[2]*255)]
         self.pad = True
 
         if color_pca is not None:
@@ -93,22 +94,20 @@ class FishDataset(Dataset):
         img_H = img.size[0]
         img_W = img.size[1]
 
-        # Resize
+        # Resize and pad
         smaller_dimension = 0 if img_H < img_W else 1
         larger_dimension = 1 if img_H < img_W else 0
-        if imageDimension != img_H or imageDimension != img_W:
+        if self.pad and (imageDimension != img_H or imageDimension != img_W):
             new_smaller_dimension = int(imageDimension * img.size[smaller_dimension] / img.size[larger_dimension])
             if smaller_dimension == 1:
                 img = transforms.functional.resize(img, (new_smaller_dimension, imageDimension))
             else:
                 img = transforms.functional.resize(img, (imageDimension, new_smaller_dimension))
 
-        # pad
-        if self.pad:
             diff = imageDimension - new_smaller_dimension
             pad_1 = int(diff/2)
             pad_2 = diff - pad_1
-            fill = tuple([round(x) for x in self.RGBmean])
+            fill = tuple(self.RGBmean)
 
             if smaller_dimension == 0:
                 img = transforms.functional.pad(img, (pad_1, 0, pad_2, 0), padding_mode='constant', fill = fill)
