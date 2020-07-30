@@ -5,25 +5,19 @@ import itertools
 import hashlib
 import copy
 import pandas as pd
+import pickle
     
 #TODO: All experiments wit datasplit params having augmented should have it removed.
 # This is because being augmented should have same split if it is not augmented.
-def getDatasetParams(params, with_aug = False):
+def getDatasetParams(params):
     result = {
-        "training_count": params["training_count"],
-        "validation_count": params["validation_count"],
         "image_path": params["image_path"],
         "suffix": params['suffix'],
     }
-    if with_aug:
-        result = {**result, **{
-            "augmented": params['augmented'],
-            "aug_profile": params['aug_profile'],       
-        }}
     return result
     
-def getDatasetName(params, with_aug = False):
-    datasetName = str(getDatasetParams(params, with_aug))
+def getDatasetName(params):
+    datasetName = str(getDatasetParams(params))
     datasetName = hashlib.sha224(datasetName.encode('utf-8')).hexdigest()
     
     return os.path.join('datasplits',datasetName)
@@ -63,6 +57,7 @@ def getExperimentParamsAndRecord(experimentsPath, experimentName, trial_hash) :
 
 
 configJsonFileName = "params.json"
+configPickleFileName = "params.pkl"
 
 class ConfigParser:
     def __init__(self, experimentsPath, dataPath, experimentName):
@@ -154,20 +149,15 @@ class ConfigParser:
     def fixExperimentParams(self, params_):
         params= copy.copy(params_)
 
-        params["training_count"] = params["training_count"] if ("training_count" in params) is not None else 0.64
-        params["validation_count"] = params["validation_count"] if ("validation_count" in params) is not None else 0.16
         params["batchSize"] = params["batchSize"] if ("batchSize" in params) else 32
         params["learning_rate"] = params["learning_rate"] if ("learning_rate" in params) else 0.0005
         params["numOfTrials"] = params["numOfTrials"] if ("numOfTrials" in params) else 1
-        params["patience"] = params["patience"] if ("patience" in params) else 100
         params["fc_layers"] = params["fc_layers"] if ("fc_layers" in params) else 1
         params["modelType"] = params["modelType"] if ("modelType" in params) else "blackbox"
         params["lambda"] = params["lambda"] if ("lambda" in params) else 1
-        params["unsupervisedOnTest"] = params["unsupervisedOnTest"] if ("unsupervisedOnTest" in params) else False
         params["tl_model"] = params["tl_model"] if ("tl_model" in params) else "ResNet18"
         params["augmented"] = params["augmented"] if ("augmented" in params) else False
         params["img_res"] = params["img_res"] if ("img_res" in params) else 224
         params["link_layer"] = params["link_layer"] if ("link_layer" in params) else "layer1"
-        params["aug_profile"] = params["aug_profile"] if ("aug_profile" in params) else None
         
         return params

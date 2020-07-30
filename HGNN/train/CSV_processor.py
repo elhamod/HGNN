@@ -3,6 +3,7 @@ import torch
 import pandas as pd
 from PIL import Image
 from tqdm import tqdm
+import time
 
 # metadata file provided by dataset.
 fine_csv_fileName = "metadata.csv"
@@ -32,61 +33,24 @@ class CSV_processor:
         self.data_root = data_root
         self.suffix = suffix
         self.augmentation_enabled = params['augmented']
-        self.aug_profile = params['aug_profile']
         self.imageDimension = params['img_res']
         self.image_subpath = image_subpath
         self.fine_csv = None
-        self.samples = []
-        self.filesPerFine_table = None
-        self.filesPerFamilyAndGenis_table = None
-        self.fileName_to_index = {}
-
-        # get number of augmented images
-        if self.augmentation_enabled:
-            if self.aug_profile is not None:
-                try:
-                    aug_file_df = pd.read_csv(os.path.join(data_path, 'aug_params.csv'))
-                    aug_file_df = aug_file_df.loc[((aug_file_df['aug_profile'] == self.aug_profile) & 
-                                (aug_file_df['img_res'] == self.imageDimension) &
-                                (aug_file_df['suffix'] ==self.suffix))]
-                    aug_file_df['image_path_match'] = aug_file_df['image_path'].apply(lambda x: os.path.join(data_path, x) == self.data_root)
-                    aug_file_df = aug_file_df.loc[aug_file_df['image_path_match'] == True]
-                    self.max_number_of_augmented_images =aug_file_df['numOfAugmentedVersions'].item()
-                except:
-                    print("could not read aug_params.csv")
-                    print(aug_file_df)
-                    raise
-            # else:
-                # print("aug_profile can't be None when augmentation is enabled")
-                # raise
-
 
         self.get_csv_file()
         self.cleanup_csv_file()
         self.save_csv_file()
-    
-    # Creates tables of files per fine/coarse/family
-    def get_statistics(self, saveToDisk=False):
-        self.filesPerFine_table = self.fine_csv[fine_csv_scientificName_header].reset_index().groupby(fine_csv_scientificName_header).agg('count').sort_values(by=[fine_csv_fileName_header]).rename(columns={fine_csv_fileName_header: "count"})
-        
-        self.filesPerFamilyAndGenis_table = self.fine_csv[[fine_csv_Family_header, fine_csv_Coarse_header]].reset_index().groupby([fine_csv_Family_header, fine_csv_Coarse_header]).agg('count').sort_values(by=[fine_csv_Family_header, fine_csv_Coarse_header]).rename(columns={fine_csv_fileName_header: "count"})
-        
-        if saveToDisk:
-            self.filesPerFine_table.to_csv(os.path.join(self.data_root, self.suffix, statistic_countPerFine))
-            self.filesPerFamilyAndGenis_table.to_csv(os.path.join(self.data_root, self.suffix, statistic_countPerFamilyAndGenis))
+
+    def getCoarseLabel(self, fileName):
+        return self.fine_csv.loc[fileName][fine_csv_Coarse_header]
+    def getFineLabel(self, fileName):
+        return self.fine_csv.loc[fileName][fine_csv_scientificName_header]
     
     # The list of fine/coarse names
     def getFineList(self):
-         return self.fine_csv[fine_csv_scientificName_header].unique().tolist()    
+         return sorted(self.fine_csv[fine_csv_scientificName_header].unique().tolist())    
     def getCoarseList(self): 
-        return self.fine_csv[fine_csv_Coarse_header].unique().tolist()   
-    def getFineIndices(self, fine):
-        result = self.fine_csv[fine_csv_scientificName_header].reset_index()
-        return result[result[fine_csv_scientificName_header]==fine].index.tolist() 
-    def getNumberOfImagesForFine(self, fine):
-        countByFine_table = self.fine_csv[fine_csv_scientificName_header].reset_index().groupby(fine_csv_scientificName_header).count()
-        selectedCount = countByFine_table.loc[fine]
-        return selectedCount[0].item()
+        return sorted(self.fine_csv[fine_csv_Coarse_header].unique().tolist())   
     
     # Fine/Coarse conversions
     def getFineWithinCoarse(self, coarse):
@@ -125,13 +89,6 @@ class CSV_processor:
 
         # and sort
         self.fine_csv = self.fine_csv.sort_values(by=[fine_csv_Family_header, fine_csv_Coarse_header])
-
-    # gets the index form a fileName
-    def get_index_from_fileName(self, fileName):
-        if fileName in self.fileName_to_index:
-            return self.fileName_to_index[fileName]
-        else:
-            raise Exception(f"{fileName} is not in this dataset")
     
     def get_image_full_path(self):
         return os.path.join(self.data_root, self.image_subpath)
@@ -143,58 +100,6 @@ class CSV_processor:
         #get intersection between csv file and list of images
         fileNames1 = os.listdir(img_full_path)
         fileNames2 = self.fine_csv.index.values.tolist()
-        fileNames = [value for value in fileNames1 if value in fileNames2]
-        FoundFileNames = []
-        profile_name_string = ("_" + self.aug_profile) if self.aug_profile is not None else ""
-        with tqdm(total=len(fileNames), desc="Loading images") as bar:
-            for fileName in fileNames:
-                try:
-                    # Find match in csv file
-                    matchRow = self.fine_csv.loc[fileName]
-                    matchFine = matchRow[fine_csv_scientificName_header]
-    #                 matchFamily = matchRow[fine_csv_Family_header]
-                    matchCoarse = matchRow[fine_csv_Coarse_header]
-
-                    # Go through original and augmented image   
-                    images = []
-                    prefix, ext = os.path.splitext(fileName)
-                    scaledFile = os.path.join(img_full_path, prefix+"_"+str(self.imageDimension)+ext)
-                    # if imageDimension is None, then load orginals, not scaled.
-                    if self.imageDimension is not None and os.path.exists(scaledFile):
-                        original = Image.open(scaledFile)   
-                        bar.set_postfix(fileName=scaledFile)
-                    else:
-                        fileNameAndPath = os.path.join(img_full_path, fileName)
-                        original = Image.open(fileNameAndPath)
-                        bar.set_postfix(fileName=fileNameAndPath)
-                    original.load()
-                    images.append(original)
-                    if self.augmentation_enabled and self.imageDimension is not None:
-                        for k in range(self.max_number_of_augmented_images):
-                            file = os.path.join(img_full_path, prefix+"_"+str(self.imageDimension)+"_aug"+str(k)+profile_name_string+ext)
-                        #for file in glob.glob(os.path.join(img_full_path, prefix+"_"+str(self.imageDimension)+"_aug*"+ext)): # glob is very slow.
-                            if os.path.exists(file):
-                                bar.set_postfix(fileName=file) 
-                                augmented = Image.open(os.path.join(img_full_path, file))
-                                images.append(augmented)  # Converting to np is making this loading slow! For future, always use Image.open alone and only convert to np when needed (e.g. matlab display)
-                                augmented.load()
-                            else:
-                                break
-
-                    sampleInfo = {
-                        'fine': matchFine,
-    #                     'family': matchFamily,
-                        'coarse': matchCoarse,
-                        'fileName': fileName,
-                        'images':  images
-                    }
-                    self.samples.append(sampleInfo)
-                    self.fileName_to_index[fileName] = len(self.samples)-1
-
-                    FoundFileNames.append(fileName)
-                except Exception as inst:
-                    print("Unexpected error:", inst)
-                    pass
-                bar.update()
+        fileNames = [value for value in tqdm(fileNames2, desc="scanning files") if value in fileNames1]
         
-        self.fine_csv = self.fine_csv.loc[FoundFileNames]
+        self.fine_csv = self.fine_csv.loc[fileNames]

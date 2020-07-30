@@ -1,82 +1,79 @@
 import os
 from torch.utils.data import Dataset
 import numpy as np
-from torch.utils.data.sampler import SubsetRandomSampler
 import torch
-import time
 from torchvision import transforms
 from tqdm import tqdm
-# import joblib
-import copy
 import random
-import csv
 import json
-from sklearn.model_selection import train_test_split
-from PIL import Image, ImageStat
-import hashlib
-from random import randrange
+import torchvision
+from myhelpers.dataset_normalization import dataset_normalization
+from myhelpers.color_PCA import Color_PCA
 
-from .configParser import getDatasetName, getDatasetParams
+from .configParser import getDatasetName
 from .CSV_processor import CSV_processor
 
 
-testIndexFileName = "testIndex.csv"
-valIndexFileName = "valIndex.csv"
-trainingIndexFileName = "trainingIndex.csv"
-paramsFileName="params.json"
-normalizationFileName="normalization_params.json"
-
-
-# sets whether to pre-load (time efficient) pr post-load(memory efficient)
-memory_efficient = False # default False.
-
+num_of_workers = 4
 
 class FishDataset(Dataset):
-    def __init__(self, params, data_path, verbose=False):
-        self.transformedSamples = {} # caches the transformed samples to speed training up
+    def __init__(self, type_, params, data_path, normalizer, color_pca, csv_processor, verbose=False):
         self.imageDimension = params["img_res"] # if None, CSV_processor will load original images
         self.n_channels = 3
         self.data_root, self.suffix  = getParams(params)
-        self.augmentation_enabled = params["augmented"]
-        self.normalization_enabled = True
-        self.pad = True
+        self.augmentation_enabled = False
+        self.normalization_enabled = False
+        self.pad = False
         self.normalizer = None
-        self.composedTransforms = None
+        self.composedTransforms = None   
         
-        data_root_suffix = os.path.join(self.data_root, self.suffix)
+        data_root_suffix = os.path.join(self.data_root, self.suffix, type_)
         if not os.path.exists(data_root_suffix):
             os.makedirs(data_root_suffix)
-        
+        self.dataset = torchvision.datasets.ImageFolder(data_root_suffix, transform=transforms.Compose(self.getTransforms()), target_transform=None)
 
-        self.csv_processor = CSV_processor(self.data_root, self.suffix, data_path, params)
+        if normalizer is not None:
+            self.normalizer = normalizer
+        else:
+            self.normalizer = dataset_normalization(data_root_suffix, self.dataset, res=params['img_res']).getTransform()[0]
+        self.RGBmean = [self.normalizer.mean[0]*255, self.normalizer.mean[1]*255, self.normalizer.mean[2]*255]
 
-    def getNormalizer(self):
-        if self.normalizer is None:
-            fullNormalizationFileName = os.path.join(self.data_root, self.suffix, normalizationFileName)
-            try:
-                with open(fullNormalizationFileName, 'rb') as f:
-                    j = json.loads(f.read())
-            except:
-                print("Could not open normalization file", fullNormalizationFileName)
-                raise
-            self.normalizer = [transforms.Normalize(mean=j['mean'],
-                        std=j['std'])]
+        self.pad = True
+
+        if color_pca is not None:
+            self.color_pca = color_pca
+        else: 
+            self.color_pca = Color_PCA(data_root_suffix, torch.utils.data.DataLoader(self.dataset, batch_size=128), 1.5)
+
+        self.augmentation_enabled = params["augmented"]
+        self.normalization_enabled = True
+       
         
-        return self.normalizer
+        if csv_processor is None:
+            self.csv_processor = CSV_processor(self.data_root, self.suffix, data_path, params)
+        else:
+            self.csv_processor = csv_processor
 
     def getTransforms(self):
         transformsList = [#transforms.ToPILImage(),
             transforms.Lambda(self.MakeSquared)]
+
+        if self.augmentation_enabled:
+            transformsList + [transforms.RandomHorizontalFlip(p=0.3),
+            transforms.RandomAffine(degrees=60, translate=(0.25, 0.25), fillcolor=self.RGBmean)]
         
         transformsList = transformsList + [transforms.ToTensor()]
+
+        if self.augmentation_enabled:
+            transformsList = transformsList + [transforms.Lambda(self.color_pca.perturb_color)]
               
         if self.normalization_enabled:
-            transformsList = transformsList + self.getNormalizer()
+            transformsList = transformsList + [self.normalizer]
         return transformsList
        
 
     def __len__(self):
-        return len(self.csv_processor.samples)
+        return len(self.dataset)
 
     
     # Toggles whether loaded images are normalized, squared, or augmented
@@ -87,23 +84,6 @@ class FishDataset(Dataset):
         self.pad = pad if pad is not None else self.pad
         self.composedTransforms = None
         return old
-    
-    def createTransformedSamples(self, transformHash):
-        self.transformedSamples[transformHash] = {}
-        with tqdm(total=len(self.csv_processor.samples), desc="Transforming images") as bar:
-
-            # Go through the original images
-            for i, sample in enumerate(self.csv_processor.samples):
-                images = self.csv_processor.samples[i]['images']
-                self.transformedSamples[transformHash][i] = {}
-
-                # For each original, get the first one. Only get the rest if augmentation is enabled
-                for j, image in enumerate(images): 
-                    image = self.composedTransforms(image)
-                    self.transformedSamples[transformHash][i][j] = image
-                    if not self.augmentation_enabled:
-                        break
-                bar.update()
 
     # Makes the image squared while still preserving the aspect ratio
     def MakeSquared(self, img):
@@ -117,21 +97,18 @@ class FishDataset(Dataset):
         smaller_dimension = 0 if img_H < img_W else 1
         larger_dimension = 1 if img_H < img_W else 0
         if imageDimension != img_H or imageDimension != img_W:
-        new_smaller_dimension = int(imageDimension * img.size[smaller_dimension] / img.size[larger_dimension])
-        if smaller_dimension == 1:
-            img = transforms.functional.resize(img, (new_smaller_dimension, imageDimension))
-        else:
-            img = transforms.functional.resize(img, (imageDimension, new_smaller_dimension))
+            new_smaller_dimension = int(imageDimension * img.size[smaller_dimension] / img.size[larger_dimension])
+            if smaller_dimension == 1:
+                img = transforms.functional.resize(img, (new_smaller_dimension, imageDimension))
+            else:
+                img = transforms.functional.resize(img, (imageDimension, new_smaller_dimension))
 
         # pad
         if self.pad:
             diff = imageDimension - new_smaller_dimension
             pad_1 = int(diff/2)
             pad_2 = diff - pad_1
-            # stat = ImageStat.Stat(img)
-            normalizer = self.getNormalizer()
-            RGBmean = [normalizer[0].mean[0]*255, normalizer[0].mean[1]*255, normalizer[0].mean[2]*255]
-            fill = tuple([round(x) for x in RGBmean])
+            fill = tuple([round(x) for x in self.RGBmean])
 
             if smaller_dimension == 0:
                 img = transforms.functional.pad(img, (pad_1, 0, pad_2, 0), padding_mode='constant', fill = fill)
@@ -139,87 +116,32 @@ class FishDataset(Dataset):
                 img = transforms.functional.pad(img, (0, pad_1, 0, pad_2), padding_mode='constant', fill = fill)
 
         return img
-    
-    
-    def __getitem__(self, idx):          
-        img_fine = self.csv_processor.samples[idx]['fine']
-        img_fine_index = torch.tensor(self.csv_processor.getFineList().index(img_fine))
-        
-        # Cache transformed images
+
+
+    def __getitem__(self, idx):   
         if self.composedTransforms is None:
             self.composedTransforms = transforms.Compose(self.getTransforms())
-        
-        # Cache transformed images
-        if not memory_efficient:
-            hashString = str(self.augmentation_enabled) + str(self.normalization_enabled) + str(self.pad)
-            transformHash = hashlib.sha224(hashString.encode('utf-8')).hexdigest()
-                
-            if transformHash not in self.transformedSamples:
-                self.createTransformedSamples(transformHash)
+            self.dataset.transform = self.composedTransforms 
 
-            imageList = self.transformedSamples[transformHash][idx]
-            numOfImages = len(imageList)
-            image = imageList[randrange(numOfImages)] 
-        else:
-            imageList = self.csv_processor.samples[idx]['images']
-            numOfImages = len(imageList)
-            image = imageList[randrange(numOfImages)]
-            image = self.composedTransforms(image)
-         
-               
-        fileName = self.csv_processor.samples[idx]['fileName']
+        image, target = self.dataset[idx]
+        image = image.type(torch.FloatTensor)
+        fileName = self.dataset.samples[idx][0]
+        fileName = os.path.basename(fileName)
+
+        img_fine_label = self.csv_processor.getFineLabel(fileName)
+        img_fine_index = self.csv_processor.getFineList().index(img_fine_label)
+        assert(target == img_fine_index), f"label in dataset is not the same as file name in csv, {fileName}, in dataset={target}, in csv={img_fine_index}"
+        img_fine_index = torch.tensor(img_fine_index)
+
 #         matchFamily = self.csv_processor.samples[idx]['family']
-        matchcoarse = self.csv_processor.samples[idx]['coarse']
+        matchcoarse = self.csv_processor.getCoarseLabel(fileName)
         matchcoarse_index = torch.tensor(self.csv_processor.getCoarseList().index(matchcoarse))
-    
-        if torch.cuda.is_available():
-            image = image.cuda()
-            matchcoarse_index = matchcoarse_index.cuda()
-            img_fine_index = img_fine_index.cuda()
 
         return {'image': image, 
                 'fine': img_fine_index, 
                 'fileName': fileName,
                 'coarse': matchcoarse_index,} 
-    
-    
-    
-    
-    
-    
 
-def writeFile(folder_name, file_name, obj):
-    if not os.path.exists(folder_name):
-        os.makedirs(folder_name)
-    try:
-        with open(file_name, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(obj)
-#         with open(file_name, 'wb') as f:
-# #             joblib.dump(obj, f) 
-        print('file',file_name,'written')
-    except:
-        print("Couldn't write", file_name)
-        pass
-        
-def readFile(fullFileName):
-    try:
-        with open(fullFileName, newline='') as f:
-            reader = csv.reader(f)
-            loaded = list(reader)
-#         with open(fullFileName, 'rb') as filehandle:
-# #             loaded = joblib.load(filehandle) 
-            print('file',fullFileName,'read')
-            loaded[0] = [int(i) for i in loaded[0]]
-            return loaded[0]
-    except:
-        print("Couldn't read", fullFileName)
-        pass  
-
-    
-    
-    
-    
 
 def getParams(params):
     data_root = params["image_path"]
@@ -233,14 +155,14 @@ class datasetManager:
         self.data_root = None
         self.experimentName = experimentName
         self.datasetName = None
-        self.datasetName_withaug = None
-        self.loader_indices = []
         self.params = None
         self.data_path = data_path
         self.reset()
     
     def reset(self):
-        self.dataset = None
+        self.dataset_train = None
+        self.dataset_val = None
+        self.dataset_test = None
         self.train_loader = None
         self.validation_loader =  None
         self.test_loader = None
@@ -250,103 +172,36 @@ class datasetManager:
         self.params = params
 
         datasetName = getDatasetName(params)
-        datasetName_withaug = getDatasetName(params, True)
         if datasetName != self.datasetName:
             self.datasetName = datasetName
             self.data_root, self.suffix = getParams(params)
-            self.loader_indices = []
             self.experiment_folder_name = os.path.join(self.data_root, self.suffix, self.experimentName)
             self.dataset_folder_name = os.path.join(self.experiment_folder_name, datasetName)
-        if datasetName_withaug != self.datasetName_withaug:
             self.reset()
-            self.datasetName_withaug = datasetName_withaug
         
     def getDataset(self):
-        if self.dataset is None:
-            print("Creating dataset...")
-            self.dataset = FishDataset(self.params, self.data_path, self.verbose)
-            print("Creating dataset... Done.")
-        return self.dataset
+        if self.dataset_train is None:
+            print("Creating datasets...")
+            self.dataset_train = FishDataset("train", self.params, self.data_path, None, None, None, self.verbose)
+            self.dataset_val = FishDataset("val", self.params, self.data_path, self.dataset_train.normalizer, self.dataset_train.color_pca, self.dataset_train.csv_processor, self.verbose)
+            self.dataset_test = FishDataset("test", self.params, self.data_path, self.dataset_train.normalizer, self.dataset_train.color_pca, self.dataset_train.csv_processor, self.verbose)
+            print("Creating datasets... Done.")
+        return self.dataset_train, self.dataset_val, self.dataset_test
 
     # Creates the train/val/test dataloaders out of the dataset 
-    def getLoaders(self, resplit=False):
-        index_fileNames = [trainingIndexFileName, valIndexFileName, testIndexFileName]
-        saved_index_file = os.path.join(self.dataset_folder_name, testIndexFileName)
+    def getLoaders(self):
         batchSize = self.params["batchSize"]
 
-        if resplit or self.loader_indices == []:
-            if self.dataset is None:
-                self.getDataset()
-
-            training_count = self.params["training_count"]        
-            validation_count = self.params["validation_count"]
-           
- 
-            
-            if not os.path.exists(saved_index_file):
-                
-                indices_len = len(self.dataset)
-                data_loader = torch.utils.data.DataLoader(self.dataset,
-                                            batch_size=batchSize,
-                                            shuffle=False)
-                labels=None
-                for batch in data_loader:
-                    if labels is None:
-                        labels = batch['fine']
-                    else:
-                        labels = torch.cat((labels, batch['fine']), 0)
-                if torch.cuda.is_available():
-                    labels = labels.cpu() 
-                indices = range(indices_len)
-                train_indices, test_indices = train_test_split(indices, test_size= 1-training_count-validation_count, 
-                                                            stratify=labels.cpu())
-
-                print("train/test = ", len(train_indices),len(test_indices))
-                labels_sub = labels[train_indices]
-                if torch.cuda.is_available():
-                    labels_sub = labels_sub.cpu() 
-                train_indices, val_indices = train_test_split(train_indices, test_size= validation_count/(validation_count+training_count), 
-                                                            stratify=labels_sub.cpu())
-        
-                print("train/val = ", len(train_indices),len(val_indices))
-                self.loader_indices = [train_indices, val_indices, test_indices]
-
-            else:
-                # load the pickles
-                print("Loading saved indices...")
-                for i, name in enumerate(index_fileNames):   
-                    f = self.get_indices(name)
-                    self.loader_indices.append(f)
-                    
-
-        # create samplers
-        train_sampler = SubsetRandomSampler(self.loader_indices[0])
-        valid_sampler = SubsetRandomSampler(self.loader_indices[1])
-        test_sampler = SubsetRandomSampler(self.loader_indices[2])
+        if self.dataset_train is None:
+            self.getDataset()
 
         # create data loaders.
         print("Creating loaders...")
-        self.train_loader = torch.utils.data.DataLoader(self.dataset, sampler=train_sampler, batch_size=batchSize)
-        self.validation_loader = torch.utils.data.DataLoader(copy.copy(self.dataset), sampler=valid_sampler, batch_size=batchSize)
-        self.validation_loader.dataset.toggle_image_loading(augmentation=False, normalization=self.dataset.normalization_enabled)
-        self.test_loader = torch.utils.data.DataLoader(copy.copy(self.dataset), sampler=test_sampler, batch_size=batchSize)
-        self.test_loader.dataset.toggle_image_loading(augmentation=False, normalization=self.dataset.normalization_enabled) # Needed so we always get the same prediction accuracy 
+        self.train_loader = torch.utils.data.DataLoader(self.dataset_train, shuffle=True, batch_size=batchSize, num_workers=num_of_workers)
+        self.validation_loader = torch.utils.data.DataLoader(self.dataset_val, shuffle=True, batch_size=batchSize, num_workers=num_of_workers)
+        self.validation_loader.dataset.toggle_image_loading(augmentation=False, normalization=self.dataset_val.normalization_enabled)
+        self.test_loader = torch.utils.data.DataLoader(self.dataset_test, shuffle=True, batch_size=batchSize, num_workers=num_of_workers)
+        self.test_loader.dataset.toggle_image_loading(augmentation=False, normalization=self.dataset_test.normalization_enabled) # Needed so we always get the same prediction accuracy 
         print("Creating loaders... Done.")
-            
-        
-        if not os.path.exists(saved_index_file):
-            # save indices
-            for i, name in enumerate(index_fileNames):
-                fullFileName = os.path.join(self.dataset_folder_name, name)
-                writeFile(self.dataset_folder_name, fullFileName, self.loader_indices[i])
-            # save params
-            j = json.dumps(getDatasetParams(self.params))
-            f = open(os.path.join(self.dataset_folder_name, paramsFileName),"w")        
-            f.write(j)
-            f.close()   
-
         
         return self.train_loader, self.validation_loader, self.test_loader
-
-    def get_indices(self, indices_file):
-        return readFile(os.path.join(self.dataset_folder_name, indices_file))

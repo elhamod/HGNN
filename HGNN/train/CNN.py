@@ -292,7 +292,7 @@ class CNN_Two_Nets(nn.Module):
         "fine": True,
         "coarse" : True
     }
-    def activations(self, x, outputs=default_outputs):     
+    def activations(self, x, outputs=default_outputs):  
         hy_features = self.h_y(x)
         
         hb_hy_features = None
@@ -344,7 +344,7 @@ def getModelFile(experimentName):
 
 def trainModel(train_loader, validation_loader, params, model, savedModelName, test_loader=None):  
     n_epochs = 500
-    patience = 10
+    patience = 5
     learning_rate = params["learning_rate"]
     modelType = params["modelType"]
     batchSize = params["batchSize"]
@@ -376,6 +376,12 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
         for epoch in range(n_epochs):
             model.train()
             for batch in train_loader:
+    
+                if torch.cuda.is_available():
+                    batch["image"] = batch["image"].cuda()
+                    batch["fine"] = batch["fine"].cuda()
+                    batch["coarse"] = batch["coarse"].cuda()
+
                 optimizer.zero_grad()
                 with torch.set_grad_enabled(True):
                     z = applyModel(batch["image"], model)
@@ -393,6 +399,12 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                     optimizer.step()
             if unsupervisedOnTest and test_loader and not isOldBlackbox:
                 for batch in test_loader:
+
+                    if torch.cuda.is_available():
+                        batch["image"] = batch["image"].cuda()
+                        batch["fine"] = batch["fine"].cuda()
+                        batch["coarse"] = batch["coarse"].cuda()
+
                     optimizer.zero_grad()
                     with torch.set_grad_enabled(True):
                         z = applyModel(batch["image"], model)
@@ -468,7 +480,9 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
 def loadModel(model, savedModelName):
     model.load_state_dict(torch.load(os.path.join(savedModelName, modelFinalCheckpoint), map_location=torch.device('cpu'))) 
     if torch.cuda.is_available():
+        print('model',model.get_device())
         model.cuda()
+        print('model',model.get_device())
     model.eval()
 
     time_elapsed = 0
@@ -532,6 +546,11 @@ def getLoaderPredictionProbabilities(loader, model, params, label="fine"):
     model.eval()
     with torch.set_grad_enabled(False):
         for batch in loader:
+            if torch.cuda.is_available():
+                batch["image"] = batch["image"].cuda()
+                batch["fine"] = batch["fine"].cuda()
+                batch["coarse"] = batch["coarse"].cuda()
+
             inputs = batch["image"]
             classes = batch[label]
             preds = applyModel(inputs, model)

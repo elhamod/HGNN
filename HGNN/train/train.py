@@ -48,15 +48,10 @@ def main(cuda, experimentsPath, dataPath, experimentName):
 
             # load images 
             datasetManager.updateParams(config_parser.fixPaths(experiment_params))
-            dataset = datasetManager.getDataset()
             train_loader, validation_loader, test_loader = datasetManager.getLoaders()
-            fineList = dataset.csv_processor.getFineList()
-            coarseList = dataset.csv_processor.getCoarseList()
-            numberOffine = len(fineList)
-            numberOfcoarse = len(coarseList)
             architecture = {
-                "fine": numberOffine,
-                "coarse" : numberOfcoarse
+                "fine": len(train_loader.dataset.csv_processor.getFineList()),
+                "coarse" : len(train_loader.dataset.csv_processor.getCoarseList())
             }
 
             # Loop through n trials
@@ -101,6 +96,8 @@ def main(cuda, experimentsPath, dataPath, experimentName):
             
 
 if __name__ == "__main__":
+    torch.multiprocessing.set_start_method('spawn')
+    
     import argparse
 
     parser = argparse.ArgumentParser()
