@@ -346,7 +346,7 @@ def getModelFile(experimentName):
 
 def trainModel(train_loader, validation_loader, params, model, savedModelName, test_loader=None):  
     n_epochs = 500
-    patience = 5
+    patience = 10
     learning_rate = params["learning_rate"]
     modelType = params["modelType"]
     unsupervisedOnTest = params["unsupervisedOnTest"]
@@ -481,9 +481,8 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
 def loadModel(model, savedModelName):
     model.load_state_dict(torch.load(os.path.join(savedModelName, modelFinalCheckpoint), map_location=torch.device('cpu'))) 
     if torch.cuda.is_available():
-        print('model',model.get_device())
         model.cuda()
-        print('model',model.get_device())
+
     model.eval()
 
     time_elapsed = 0

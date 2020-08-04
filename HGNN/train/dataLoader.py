@@ -7,6 +7,7 @@ from tqdm import tqdm
 import random
 import json
 import torchvision
+import re
 
 from myhelpers.dataset_normalization import dataset_normalization
 from myhelpers.color_PCA import Color_PCA
@@ -17,6 +18,14 @@ from .CSV_processor import CSV_processor
 
 
 num_of_workers = 8
+
+IMG_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tiff', '.webp')
+
+def is_valid_file_no_augmentation(path):
+    fileName = os.path.basename(path)
+    # A file is not valid if it has "XXXX_aug_n.XXX", where n is not 0
+    isValid = ("_aug_0." in fileName) or not ("_aug_" in fileName)
+    return isValid
 
 class FishDataset(Dataset):
     def __init__(self, type_, params, data_path, normalizer, color_pca, csv_processor, verbose=False):
@@ -32,7 +41,8 @@ class FishDataset(Dataset):
         data_root_suffix = os.path.join(self.data_root, self.suffix, type_)
         if not os.path.exists(data_root_suffix):
             os.makedirs(data_root_suffix)
-        self.dataset = torchvision.datasets.ImageFolder(data_root_suffix, transform=transforms.Compose(self.getTransforms()), target_transform=None)
+        # Only valid files are the non-augmented ones 
+        self.dataset = torchvision.datasets.ImageFolder(data_root_suffix, is_valid_file=is_valid_file_no_augmentation, transform=transforms.Compose(self.getTransforms()), target_transform=None)
 
         if normalizer is not None:
             self.normalizer = normalizer
@@ -126,6 +136,7 @@ class FishDataset(Dataset):
         image = image.type(torch.FloatTensor)
         fileName = self.dataset.samples[idx][0]
         fileName = os.path.basename(fileName)
+        fileName = re.sub(r'_{}_aug_\d+'.format(self.imageDimension), '', fileName)
 
         img_fine_label = self.csv_processor.getFineLabel(fileName)
         img_fine_index = self.csv_processor.getFineList().index(img_fine_label)
