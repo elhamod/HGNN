@@ -290,6 +290,19 @@ class CNN_Two_Nets(nn.Module):
         return result
 
 
+    def get_coarse(self, x, dataset):
+        result = self(x)
+        if self.modelType!="DSN" and self.modelType!="BB" and self.modelType != "HGNNgc0":
+            result = result['coarse']
+        else:
+            fineToCoarse = dataset.csv_processor.getFineToCoarseMatrix()
+            if torch.cuda.is_available():
+                fineToCoarse = fineToCoarse.cuda()
+            result = torch.mm(result['fine'], fineToCoarse)
+        return result
+
+
+
     default_outputs = {
         "fine": True,
         "coarse" : True
@@ -331,6 +344,7 @@ class CNN_Two_Nets(nn.Module):
             "input": x,
             "hy_features": hy_features,
             "hb_features": hb_features,
+            "hb_hy_features": hb_hy_features,
             "gy_features": gy_features if outputs["fine"] else None,
             "gc_features": gc_features if outputs["coarse"] else None,
             "coarse": yc if outputs["coarse"] and modelType_has_coarse else None,
@@ -415,19 +429,57 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                         optimizer.step()
             
             model.eval()
-            
-            row_information = {
-                'validation_fine_f1': getLoader_f1(validation_loader, model, params),
-                'training_fine_f1': getLoader_f1(train_loader, model, params),
-                'test_fine_f1': getLoader_f1(test_loader, model, params) if test_loader and detailed_reporting else None,
-                'validation_loss': getCrossEntropyFromLoader(validation_loader, model, params),
-                'training_loss': getCrossEntropyFromLoader(train_loader, model, params) if detailed_reporting else None,
 
-                'training_coarse_loss': getCrossEntropyFromLoader(train_loader, model, params, "coarse") if not isOldBlackbox and not isDSN and not isBlackbox and detailed_reporting else None,
-                'validation_coarse_loss': getCrossEntropyFromLoader(validation_loader, model, params, "coarse") if not isOldBlackbox and not isDSN and not isBlackbox and detailed_reporting else None,
-                'training_coarse_f1': getLoader_f1(train_loader, model, params, "coarse") if not isDSN and detailed_reporting else None,
-                'validation_coarse_f1': getLoader_f1(validation_loader, model, params, "coarse")if not isDSN and detailed_reporting else None,
-                'test_coarse_f1': getLoader_f1(test_loader, model, params, "coarse") if test_loader and not isDSN and detailed_reporting else None,
+            getCoarse = not isOldBlackbox and not isDSN and not isBlackbox
+            
+            predlist_val, lbllist_val = getLoaderPredictionProbabilities(validation_loader, model, params)
+            validation_loss = getCrossEntropy(predlist_val, lbllist_val)
+            predlist_val, lbllist_val = getPredictions(predlist_val, lbllist_val)
+            validation_fine_f1 = get_f1(predlist_val, lbllist_val)
+
+            if not isDSN:
+                predlist_val, lbllist_val = getLoaderPredictionProbabilities(validation_loader, model, params, 'coarse')
+                if getCoarse and detailed_reporting:
+                    validation_coarse_loss = getCrossEntropy(predlist_val, lbllist_val)
+                if detailed_reporting:
+                    predlist_val, lbllist_val = getPredictions(predlist_val, lbllist_val)
+                    validation_coarse_f1 = get_f1(predlist_val, lbllist_val)
+
+            predlist_train, lbllist_train = getLoaderPredictionProbabilities(train_loader, model, params)
+            training_loss = getCrossEntropy(predlist_train, lbllist_train)
+            predlist_train, lbllist_train = getPredictions(predlist_train, lbllist_train)
+            train_fine_f1 = get_f1(predlist_train, lbllist_train)
+
+            if not isDSN:
+                predlist_train, lbllist_train = getLoaderPredictionProbabilities(train_loader, model, params, 'coarse')
+                if getCoarse and detailed_reporting:
+                    training_coarse_loss = getCrossEntropy(predlist_train, lbllist_train)
+                if detailed_reporting:
+                    predlist_train, lbllist_train = getPredictions(predlist_train, lbllist_train)
+                    training_coarse_f1 = get_f1(predlist_train, lbllist_train)
+
+            if test_loader:
+                predlist_test, lbllist_test = getLoaderPredictionProbabilities(test_loader, model, params)
+                predlist_test, lbllist_test = getPredictions(predlist_test, lbllist_test)
+                test_fine_f1 = get_f1(predlist_test, lbllist_test)
+                if not isDSN:
+                    predlist_test, lbllist_test = getLoaderPredictionProbabilities(test_loader, model, params, 'coarse')
+                    if detailed_reporting:
+                        predlist_test, lbllist_test = getPredictions(predlist_test, lbllist_test)
+                        test_coarse_f1 = get_f1(predlist_test, lbllist_test)
+
+            row_information = {
+                'validation_fine_f1': validation_fine_f1,
+                'training_fine_f1': train_fine_f1,
+                'test_fine_f1': test_fine_f1 if test_loader and detailed_reporting else None,
+                'validation_loss': validation_loss,
+                'training_loss':  training_loss if detailed_reporting else None,
+
+                'training_coarse_loss': training_coarse_loss if getCoarse and detailed_reporting else None,
+                'validation_coarse_loss': validation_coarse_loss if getCoarse and detailed_reporting else None,
+                'training_coarse_f1':  training_coarse_f1 if not isDSN and detailed_reporting else None,
+                'validation_coarse_f1': validation_coarse_f1 if not isDSN and detailed_reporting else None,
+                'test_coarse_f1': test_coarse_f1 if test_loader and not isDSN and detailed_reporting else None,
             }
             
             df = df.append(pd.DataFrame(row_information, index=[0]), ignore_index = True)
@@ -515,8 +567,8 @@ def top_k_acc(output, target, topk=(1,2,3,4,5)):
 
 
 # Returns the mean of CORRECT probability of all predictions. If high, it means the model is sure about its predictions
-def getAvgProbCorrectGuessFromLoader(loader, model, params, label="fine"):
-    predlist, lbllist = getLoaderPredictionProbabilities(loader, model, params, label)
+# Takes probabilities
+def getAvgProbCorrectGuess(predlist, lbllist):
     lbllist = lbllist.reshape(lbllist.shape[0], -1)
     predlist = predlist.gather(1, lbllist)
     max_predlist = predlist.mean().item()
@@ -527,9 +579,8 @@ def getAvgProbCorrectGuessFromLoader(loader, model, params, label="fine"):
 #     predlist, _ = getLoaderPredictionProbabilities(loader, model, params, label)
 #     return torch.Tensor(entropy(predlist.cpu().T, base=2)).mean().item()
 
-def getCrossEntropyFromLoader(loader, model, params, label="fine"):
-    predlist, lbllist = getLoaderPredictionProbabilities(loader, model, params, label) 
-
+# Takes probabilities
+def getCrossEntropy(predlist, lbllist):
     criterion = nn.CrossEntropyLoss()
     return criterion(predlist, lbllist).item()
 
@@ -573,19 +624,17 @@ def getLoaderPredictionProbabilities(loader, model, params, label="fine"):
     return predlist, lbllist
 
 
-
-def getLoaderPredictions(loader, model, params, label="fine"):
-    predlist, lbllist = getLoaderPredictionProbabilities(loader, model, params, label)
-    _, predlist = torch.max(predlist, 1)
-    
-    if torch.cuda.is_available():
-        predlist = predlist.cpu()
-        lbllist = lbllist.cpu()     
+# Takes probabilities
+def getPredictions(predlist, lbllist):
+    _, predlist = torch.max(predlist, 1)  
         
     return predlist, lbllist
 
-def getLoader_f1(loader, model, params, label="fine"):
-    predlist, lbllist = getLoaderPredictions(loader, model, params, label)
+# Takes predictions
+def get_f1(predlist, lbllist):
+    if torch.cuda.is_available():
+        predlist = predlist.cpu()
+        lbllist = lbllist.cpu()   
     return f1_score(lbllist, predlist, average='macro')
 
 # Returns the distance between examples in terms of classification cross entropy

@@ -4,8 +4,8 @@ import torch
 import torch.nn as nn
 
 defaultOutputs = {
-    "species": True,
-    "genus" : False
+    "fine": True,
+    "coarse" : True
 }
 
 
@@ -18,24 +18,28 @@ class CNN_wrapper(torch.nn.Module):
         super(CNN_wrapper, self).__init__()
         self.model = model
         self.dataset= dataset
-        self.useHierarchy = params["useHeirarchy"]
-        self.setOutputsOfInterest(defaultOutputs)
+        self.setOutputsOfInterest({
+            "fine": True,
+            "coarse" : False
+            })
     
     def setOutputsOfInterest(self, outputs):
         self.outputs = outputs
         
     # Prediction
     def forward(self, x):
-        if self.useHierarchy:
-            result = self.model.activations(x, self.outputs)
-            if self.outputs['species']:
-                result = result['species']
-            elif self.outputs['genus']:
-                result = result['genus']
-        else:
+        if torch.cuda.is_available():
+            x = x.cuda()
+
+        try:
+            result = self.model.activations(x, defaultOutputs)
+        except:
             result = self.model(x)
-            if self.outputs['genus']:
-                result = torch.mm(result, self.dataset.getSpeciesToGenusMatrix())
+
+        if self.outputs['fine']:
+            result = result['fine']
+        elif self.outputs['coarse']:
+            result =  self.model.get_coarse(x, self.dataset)
         return result
     
     
@@ -156,7 +160,7 @@ class Backprop:
             self._register_relu_hooks()
 
         if torch.cuda.is_available() and use_gpu:
-            self.model = self.model.to('cuda')
+            # self.model = self.model.to('cuda')
             input_ = input_.to('cuda')
 
         self.model.zero_grad()
@@ -165,33 +169,18 @@ class Backprop:
 
 
         output = self.model(input_)
-#         print('output',output)
-#         output= output[0][target_class] - output[0][1-target_class]
-
-
-#         _, top_class = output.topk(1, dim=1)
-
-
         target = torch.FloatTensor(1, output.shape[-1]).zero_()
 
-        if torch.cuda.is_available() and use_gpu:
+        if torch.cuda.is_available():
             target = target.to('cuda')
-
-#         if (target_class is not None) and (top_class != target_class):
-#             warnings.warn(UserWarning(
-#                 f'The predicted class index {top_class.item()} does not' +
-#                 f'equal the target class index {target_class}. Calculating' +
-#                 'the gradient w.r.t. the predicted class.'
-#             ))
 
         # Set the element at top class index to be 1
 
         target[0][target_class] = 1 # top_class
 
-#         Calculate gradients of the target class output w.r.t. input_
+        # Calculate gradients of the target class output w.r.t. input_
 
         output.backward(gradient=target, retain_graph = True)
-#         output.backward(gradient=torch.ones(output.size()))
 
         # Detach the gradients from the graph and move to cpu
 
@@ -245,13 +234,15 @@ import PlotNetwork
 import matplotlib.pyplot as plt
 
 class SaliencyMap:
-    def __init__(self, dataset, model, experimentName, experiment_params):
+    def __init__(self, dataset, model, experimentName, trial_hash, experiment_params):
         self.dataset = dataset
         self.model = model
         self.experimentName = experimentName
+        self.trial_hash = trial_hash
         self.experiment_params = experiment_params
     
-    def display_map_and_predictions(self, heatmap, title, img, layerName, plot=True):
+    def display_map_and_predictions(self, heatmap, fileName, img, layerName, plot=True, use_gpu=False):
+        title = fileName.replace('_', '\_')
         if plot:
             fig = plt.figure(figsize=(8, 2.5), dpi= 300)
 
@@ -261,25 +252,31 @@ class SaliencyMap:
 
             fig.tight_layout(rect=[0, 0.03, 1, 0.95])
             fig.show()
-            fig.savefig(os.path.join(self.experimentName,"Saliency Map - " + title+".pdf"), bbox_inches = 'tight',
+            path = os.path.join(self.experimentName, "results", self.trial_hash, 'saliency_map')
+            if not os.path.exists(path):
+                os.makedirs(path)
+            fig.savefig(os.path.join(path,fileName+".pdf"), bbox_inches = 'tight',
     pad_inches = 0)
             fig.suptitle("Saliency Map - " + title)
 
+        if torch.cuda.is_available() and use_gpu:
+            img = img.cuda()
+
         if plot:
             activatins_rows = 1
-            A = PlotNetwork.plot_activations(self.model.model, layerName, img.cuda(), self.experimentName, self.experiment_params, title, activatins_rows)
+            A = PlotNetwork.plot_activations(self.model.model, layerName, img, path, self.experiment_params, self.dataset, fileName, activatins_rows)
         else:
-            activation = PlotNetwork.model_activations(self.model.model, layerName, self.experiment_params["useHeirarchy"])
-            A = activation(img.cuda())
+            activation = PlotNetwork.model_activations(self.model.model, layerName, self.dataset)
+            A = activation(img)
         return A
 
     def getTransformedImage(self, img, augmentation, normalization):
-        augmentation2, normalization2 = self.dataset.toggle_image_loading(augmentation=augmentation, normalization=normalization)
+        augmentation2, normalization2, pad2 = self.dataset.toggle_image_loading(augmentation=augmentation, normalization=normalization)
         transforms = self.dataset.getTransforms()
         composedTransforms = torchvision_transforms.Compose(transforms)
         img_clone = composedTransforms(img)
         img_clone = img_clone.unsqueeze(0)
-        self.dataset.toggle_image_loading(augmentation2, normalization2)
+        self.dataset.toggle_image_loading(augmentation2, normalization2, pad2)
         return img_clone
 
     def getBoundingBox(self, x_indx, y_indx, box_width):
@@ -293,13 +290,11 @@ class SaliencyMap:
         return x_indx, y_indx, x_width, y_width
 
     def getFiller(self, x_width, y_width, img):
-#         img.requires_grad = False
         detached = img.detach()
         filler = torch.zeros((1, 3,x_width, y_width))
         filler[0, 0, :, :] = detached[0, 0, 0, 0]
         filler[0, 1, :, :] = detached[0, 1, 0, 0]
         filler[0, 2, :, :] = detached[0, 2, 0, 0]
-#         img.requires_grad = True
         return filler
     
     def getCoordinatedOfHighest(self, tnsor, topk=1):
@@ -318,19 +313,18 @@ class SaliencyMap:
         filters = torch.ones(1, 1, box_width, box_width)
         padding = int(torch.floor(torch.tensor([float(box_width)])/2).item())
         stride = box_width
-        saliency_map = torch.nn.functional.conv2d(saliency_map.unsqueeze(0).cuda(), filters, padding=(padding, padding), stride=(stride, stride)).squeeze()
+        saliency_map = torch.nn.functional.conv2d(saliency_map.unsqueeze(0), filters, padding=(padding, padding), stride=(stride, stride)).squeeze()
         saliency_map = saliency_map.unsqueeze(0)
         # Get highest pixel after convolution
         return [element * stride for element in self.getCoordinatesOfHighestPixel(saliency_map, topk)] 
         
-    def GetSaliencyMap(self, img_full_path, fileName, layerName, maxCovered=False, box_width= None, topLeft=None, topk=1, plot=True):
+    def GetSaliencyMap(self, img_full_path, fileName, layerName, maxCovered=False, box_width= None, topLeft=None, topk=1, plot=True, use_gpu=False):
         title = fileName
-        title = title.replace('_', '\_')
         
-        isSpecies = (layerName != 'genus')
+        isFine = (layerName != 'coarse')
         self.model.setOutputsOfInterest({
-            "species": isSpecies,
-            "genus" : not isSpecies
+            "fine": isFine,
+            "coarse" : not isFine
         })
         
         original =  Image.open(os.path.join(img_full_path, fileName))
@@ -340,7 +334,10 @@ class SaliencyMap:
         image_normalized = self.getTransformedImage(original, False, True)
         image_normalized.requires_grad = True
 
-        output = self.model(image_normalized.cuda())
+        if torch.cuda.is_available() and use_gpu:
+            image_normalized = image_normalized.cuda()
+            
+        output = self.model(image_normalized)
         bestClass = torch.max(output, 1)[1]
 
         backprop = Backprop(self.model)
@@ -348,7 +345,7 @@ class SaliencyMap:
                                          bestClass,
                                          guided=True,
                                          take_max=True, #True
-                                         use_gpu=True)
+                                         use_gpu=use_gpu)
         if maxCovered:       
 
             saliency_map_max_x = torch.max(saliency_map, 1)
@@ -367,7 +364,6 @@ class SaliencyMap:
                     saliency_map_max_y_indx_, saliency_map_max_x_indx_ = self.getCoordinatesOfHighestPatch(saliency_map, box_width, i+1)
                     saliency_map_max_x_indx.append(saliency_map_max_x_indx_)
                     saliency_map_max_y_indx.append(saliency_map_max_y_indx_)
-#                 saliency_map_max_x_indx, saliency_map_max_y_indx = self.getCoordinatesOfHighestPixel(saliency_map)
             
             title = title + " - Occluded - " + str(box_width)
             for i in range(topk):
@@ -385,9 +381,9 @@ class SaliencyMap:
 
                 title_ = title + " - " + str(i+1) 
 
-                heatmap = visualizeAllClasses(backprop, image_normalized, image_non_normalized, [bestClass], guided=True, use_gpu=True)        
-                A = self.display_map_and_predictions(heatmap[0], title_, image_normalized, layerName, plot=plot)
+                heatmap = visualizeAllClasses(backprop, image_normalized, image_non_normalized, [bestClass], guided=True, use_gpu=use_gpu)        
+                A = self.display_map_and_predictions(heatmap[0], title_, image_normalized, layerName, plot=plot, use_gpu=use_gpu)
         else:
-            heatmap = visualizeAllClasses(backprop, image_normalized, image_non_normalized, [bestClass], guided=True, use_gpu=True)        
-            A = self.display_map_and_predictions(heatmap[0], title, image_normalized, layerName, plot=plot)
+            heatmap = visualizeAllClasses(backprop, image_normalized, image_non_normalized, [bestClass], guided=True, use_gpu=use_gpu)        
+            A = self.display_map_and_predictions(heatmap[0], title, image_normalized, layerName, plot=plot, use_gpu=use_gpu)
         return saliency_map, A

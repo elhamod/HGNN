@@ -153,7 +153,7 @@ class ConfigParser:
         params["learning_rate"] = params["learning_rate"] if ("learning_rate" in params) else 0.0005
         params["numOfTrials"] = params["numOfTrials"] if ("numOfTrials" in params) else 1
         params["fc_layers"] = params["fc_layers"] if ("fc_layers" in params) else 1
-        params["modelType"] = params["modelType"] if ("modelType" in params) else "blackbox"
+        params["modelType"] = params["modelType"] if ("modelType" in params) else "BB"
         params["lambda"] = params["lambda"] if ("lambda" in params) else 1
         params["tl_model"] = params["tl_model"] if ("tl_model" in params) else "ResNet18"
         params["augmented"] = params["augmented"] if ("augmented" in params) else False

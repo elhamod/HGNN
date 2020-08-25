@@ -5,24 +5,32 @@ import torch
 import numpy as np
 
 class model_activations(torch.nn.Module):
-    def __init__(self, model, layer_name, useHeirarchy):
+    def __init__(self, model, layer_name, dataset):
         super(model_activations, self).__init__()
-        
-        if not useHeirarchy:
-            self.features = model
-        else:
-            activations = model.activations
-            self.features = (lambda x: activations(x)[layer_name])
-        
+
+        self.model = model
+        self.dataset = dataset
+        self.layer_name = layer_name
+
     def forward(self, x):
-        x = self.features(x)
-        return x
+        if torch.cuda.is_available():
+            x = x.to('cuda')
+            
+        if self.layer_name == 'coarse':
+            return self.model.get_coarse(x, self.dataset)
+        else:
+            activations = self.model.activations
+            return activations(x)[self.layer_name]
     
 # Define the function for plotting the activations
-def plot_activations(model, layer_name, input_img, experimentName, params, title="", n_splits=1):
-    activation = model_activations(model, layer_name, params["useHeirarchy"])
+def plot_activations(model, layer_name, input_img, experimentName, params, dataset, fileName="", n_splits=1):
+    if torch.cuda.is_available():
+        input_img = input_img.to('cuda')
+    
+    title = fileName.replace('_', '\_')
+    activation = model_activations(model, layer_name, dataset)
     A = activation(input_img)
-    if (layer_name == "species" or layer_name == "genus"):
+    if (layer_name == "coarse" or layer_name == "fine"):
         A = torch.nn.Softmax(dim=1)(A)
     print("Number of activations: ", A.shape)
     
@@ -54,7 +62,7 @@ def plot_activations(model, layer_name, input_img, experimentName, params, title
     ax.axes.yaxis.set_visible(False)
     
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.savefig(os.path.join(experimentName, title+"_activations.pdf"), bbox_inches = 'tight',
+    plt.savefig(os.path.join(experimentName, fileName+"_activations.pdf"), bbox_inches = 'tight',
     pad_inches = 0)
     plt.suptitle("Activations - "+title, fontsize=10)
     plt.show()
