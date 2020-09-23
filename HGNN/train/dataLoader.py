@@ -5,7 +5,6 @@ import torch
 from torchvision import transforms
 from tqdm import tqdm
 import random
-import json
 import torchvision
 import re
 

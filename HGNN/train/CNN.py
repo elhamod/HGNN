@@ -25,13 +25,17 @@ import time
 
 modelFinalCheckpoint = 'finalModel.pt'
 
+saved_models_per_iteration_folder= "iterations"
+saved_models_per_iteration_name="iteration{0}.pt"
+
 statsFileName = "stats.csv"
 timeFileName = "time.csv"
 epochsFileName = "epochs.csv"
 
 paramsFileName="params.json"
 
-detailed_reporting = False
+detailed_reporting = True
+saved_models_per_iteration_frequency = 1
 
 
 class ZeroModule(Module):
@@ -375,6 +379,10 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     if not os.path.exists(savedModelName):
         os.makedirs(savedModelName)
 
+    saved_models_per_iteration = os.path.join(savedModelName, saved_models_per_iteration_folder)
+    if not os.path.exists(saved_models_per_iteration):
+        os.makedirs(saved_models_per_iteration)
+
     optimizer = torch.optim.Adam(model.parameters(), lr = learning_rate, weight_decay=weight_decay)
     
     # early stopping
@@ -491,6 +499,15 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                             min_val_loss=early_stopping.val_loss_min)
             bar.update()
 
+            # Save model
+            if detailed_reporting and (epochs % saved_models_per_iteration_frequency == 0):
+                model_name_path = os.path.join(savedModelName, saved_models_per_iteration_folder, saved_models_per_iteration_name).format(epochs)
+                try:
+                    torch.save(model.state_dict(),model_name_path)
+                except:
+                    print("model", model_name_path, "could not be saved!")
+                    pass
+
             # early stopping
             early_stopping(row_information['validation_loss'], epoch, model)
 
@@ -498,6 +515,11 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
             if early_stopping.early_stop:
                 print("Early stopping")
                 print("total number of epochs: ", epoch)
+
+                # save the final model if it has not been saved already
+                if detailed_reporting:
+                    torch.save(model.state_dict(), os.path.join(savedModelName, saved_models_per_iteration_folder, modelFinalCheckpoint))
+
                 break
             
         
