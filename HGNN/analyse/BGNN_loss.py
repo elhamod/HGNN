@@ -60,3 +60,38 @@ class BGNN_loss(loss_landscapes.Metric):
             loss = loss.cpu()
         
         return loss.numpy()
+    
+    
+
+    
+    
+    
+    
+    
+class BGNN_loss_oneBatch(loss_landscapes.Loss):
+    def __init__(self, inputs, target, meta_target, lambda_, isDSN):
+        criterion = torch.nn.CrossEntropyLoss()
+        if torch.cuda.is_available():
+            criterion = criterion.cuda()
+            inputs = inputs.cuda()
+            target = target.cuda()
+            meta_target = meta_target.cuda()
+        super().__init__(criterion, inputs, target)
+        self.isDSN = isDSN
+        self.lambda_ = lambda_
+        self.meta_target = meta_target
+
+    def __call__(self, model_wrapper) -> float:
+        output = model_wrapper.forward(self.inputs)
+        
+        loss_coarse = 0
+        if output["coarse"] is not None:
+            loss_coarse = self.loss_fn(output["coarse"], self.meta_target if not self.isDSN else self.target)
+        loss_fine = self.loss_fn(output["fine"], self.target)
+        loss = loss_fine + self.lambda_*loss_coarse
+        
+        loss = loss.detach()
+        if torch.cuda.is_available():
+            loss = loss.cpu()
+        
+        return loss.numpy()

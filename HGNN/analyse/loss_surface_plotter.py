@@ -3,6 +3,8 @@ from HGNN.train import CNN
 import torch
 from tqdm.auto import tqdm 
 
+import loss_landscapes
+
 final_model_name = "finalModel.pt"
 iterations_folder_name = "iterations"
 
@@ -21,6 +23,8 @@ def fetch_model_paths(root_path):
             print(i+1, " models added")
             break
     return model_paths
+
+
 def get_models(model_paths, architecture, experiment_params):
     models = []
     for model_path in tqdm(model_paths):
@@ -30,15 +34,21 @@ def get_models(model_paths, architecture, experiment_params):
         models.append(model)
     return models
 
+
+
 # Scale all models on the optimization path to the normalized coordinates.
-def scale_model(model_params, center_model_params, dirs_):
-    dir_one = dirs_[0]
-    dir_two = dirs_[1]
+def scale_model(model_params, center_model_params, scaled_dirs_, normalize, DISTANCE, STEPS):
+    diff = model_params - center_model_params
 
-    model_params_one = model_params.dot(dir_one)
-    model_params_two = model_params.dot(dir_two)
+    diff_one, diff_two = loss_landscapes.get_non_orth_projections(scaled_dirs_, diff)
     
-    center_model_params_one = center_model_params.dot(dir_one)
-    center_model_params_two = center_model_params.dot(dir_two)
+#     print(diff.as_numpy())
+#     h = diff_one*scaled_dirs_[0].as_numpy()/scaled_dirs_[0].model_norm() + diff_two*scaled_dirs_[1].as_numpy()/scaled_dirs_[1].model_norm()
+#     print(h)
+#     print('---')
+#     print('norm', np.linalg.norm(diff.as_numpy() - h))
+    
+    scaler=1/center_model_params.model_norm()
+    adjust = 0.5*DISTANCE/STEPS
 
-    return model_params_one - center_model_params_one, model_params_two - center_model_params_two
+    return diff_one*scaler + adjust , diff_two*scaler + adjust, diff
