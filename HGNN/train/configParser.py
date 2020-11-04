@@ -159,5 +159,8 @@ class ConfigParser:
         params["augmented"] = params["augmented"] if ("augmented" in params) else False
         params["img_res"] = params["img_res"] if ("img_res" in params) else 224
         params["link_layer"] = params["link_layer"] if ("link_layer" in params) else "layer1"
+        params["adaptive_smoothing"] = params["adaptive_smoothing"] if ("adaptive_smoothing" in params) else False
+        params["adaptive_lambda"] = params["adaptive_lambda"] if ("adaptive_lambda" in params) else 0.1
+        params["adaptive_alpha"] = params["adaptive_alpha"] if ("adaptive_alpha" in params) else 0.9
         
         return params

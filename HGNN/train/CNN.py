@@ -29,6 +29,7 @@ saved_models_per_iteration_folder= "iterations"
 saved_models_per_iteration_name="iteration{0}.pt"
 
 statsFileName = "stats.csv"
+adaptiveSmoothingFileName = "adaptive_smoothing.csv"
 timeFileName = "time.csv"
 epochsFileName = "epochs.csv"
 
@@ -362,13 +363,33 @@ def getModelFile(experimentName):
     return os.path.join(experimentName, modelFinalCheckpoint)
 
 
+def get_total_adaptive_loss(adaptive_alpha, adaptive_lambda, loss_fine, loss_coarse):
+    c = -(1-adaptive_alpha)/adaptive_lambda
+    c_fine = c*loss_fine
+    c_coarse = c*loss_coarse
+    n_fine = torch.exp(c_fine*loss_fine)
+    n_coarse = torch.exp(c_coarse*loss_coarse)
+    p = n_fine/ (n_fine + n_coarse)
+
+    lambda_fine = adaptive_alpha + (1-adaptive_alpha)*p
+    lambda_coarse = (1-adaptive_alpha)*(1-p)
+    return lambda_fine, lambda_coarse
+
 def trainModel(train_loader, validation_loader, params, model, savedModelName, test_loader=None):  
     n_epochs = 500
     patience = 10
     learning_rate = params["learning_rate"]
     modelType = params["modelType"]
     unsupervisedOnTest = params["unsupervisedOnTest"]
-    lambda_ = params["lambda"]
+    lambda_coarse = params["lambda"]
+    lambda_fine = 1
+    
+    adaptive_smoothing_enabled = params["adaptive_smoothing"]
+    adaptive_lambda = None if not adaptive_smoothing_enabled else params["adaptive_lambda"]
+    adaptive_alpha = None if not adaptive_smoothing_enabled else params["adaptive_alpha"]
+    if adaptive_smoothing_enabled:
+        df_adaptive_smoothing = pd.DataFrame()
+
     weight_decay = 0.0001
     isOldBlackbox = (modelType == "basic_blackbox")
     isBlackbox = (modelType == "BB")
@@ -414,7 +435,19 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                         if z["coarse"] is not None:
                             loss_coarse = criterion(z["coarse"], batch["coarse"] if not isDSN else batch["fine"])
                         loss_fine = criterion(z["fine"], batch["fine"])
-                        loss = loss_fine + lambda_*loss_coarse
+
+                        if adaptive_smoothing_enabled:
+                            lambda_fine, lambda_coarse = get_total_adaptive_loss(adaptive_alpha, adaptive_lambda, loss_fine, loss_coarse)
+                            adaptive_info = {
+                                'epoch': epoch,
+                                'loss_fine': loss_fine.item(),
+                                'loss_coarse': loss_coarse.item(),
+                                'lambda_fine': lambda_fine.item(),
+                                'lambda_coarse': lambda_coarse.item(),
+                            }
+                            df_adaptive_smoothing = df_adaptive_smoothing.append(pd.DataFrame(adaptive_info, index=[0]), ignore_index = True)
+
+                        loss = lambda_fine*loss_fine + lambda_coarse*loss_coarse
                         loss.backward()
                     else:    
                         loss_fine = criterion(z, batch["fine"])
@@ -536,6 +569,9 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
             torch.save(model.state_dict(), os.path.join(savedModelName, modelFinalCheckpoint))
             # save results
             df.to_csv(os.path.join(savedModelName, statsFileName))  
+
+            if adaptive_smoothing_enabled:
+                df_adaptive_smoothing.to_csv(os.path.join(savedModelName, adaptiveSmoothingFileName))  
             
             with open(os.path.join(savedModelName, timeFileName), 'w', newline='') as myfile:
                 wr = csv.writer(myfile)
