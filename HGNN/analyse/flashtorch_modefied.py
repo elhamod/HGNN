@@ -2,6 +2,7 @@ import warnings
 
 import torch
 import torch.nn as nn
+import ntpath
 
 defaultOutputs = {
     "fine": True,
@@ -241,7 +242,7 @@ class SaliencyMap:
         self.trial_hash = trial_hash
         self.experiment_params = experiment_params
     
-    def display_map_and_predictions(self, heatmap, fileName, img, layerName, plot=True, use_gpu=False):
+    def display_map_and_predictions(self, heatmap, fileName_postfix, fileName, img, layerName, plot=True, use_gpu=False):
         title = fileName.replace('_', '\_')
         if plot:
             fig = plt.figure(figsize=(8, 2.5), dpi= 300)
@@ -252,19 +253,19 @@ class SaliencyMap:
 
             fig.tight_layout(rect=[0, 0.03, 1, 0.95])
             fig.show()
-            path = os.path.join(self.experimentName, "results", self.trial_hash, 'saliency_map')
+            path = os.path.join(self.experimentName, "models", self.trial_hash, 'saliency_map', fileName)
             if not os.path.exists(path):
                 os.makedirs(path)
-            fig.savefig(os.path.join(path,fileName+".pdf"), bbox_inches = 'tight',
+            fig.savefig(os.path.join(path,fileName+fileName_postfix+".pdf"), bbox_inches = 'tight',
     pad_inches = 0)
-            fig.suptitle("Saliency Map - " + title)
+            # fig.suptitle("Saliency Map - " + title)
 
         if torch.cuda.is_available() and use_gpu:
             img = img.cuda()
 
         if plot:
             activatins_rows = 1
-            A = PlotNetwork.plot_activations(self.model.model, layerName, img, path, self.experiment_params, self.dataset, fileName, activatins_rows)
+            A = PlotNetwork.plot_activations(self.model.model, layerName, img, path, self.experiment_params, self.dataset, fileName+fileName_postfix, activatins_rows)
         else:
             activation = PlotNetwork.model_activations(self.model.model, layerName, self.dataset)
             A = activation(img)
@@ -281,13 +282,9 @@ class SaliencyMap:
 
     def getBoundingBox(self, x_indx, y_indx, box_width):
         box_half_width = int(box_width/2)
-        x_indx2 = x_indx+box_half_width
-        y_indx2 = y_indx+box_half_width
-        x_indx = x_indx-box_half_width if x_indx-box_half_width >=0 else 0
-        y_indx = y_indx-box_half_width if y_indx-box_half_width >=0 else 0
-        x_width = x_indx2 - x_indx
-        y_width = y_indx2 - y_indx
-        return x_indx, y_indx, x_width, y_width
+        x_indx = x_indx-box_half_width
+        y_indx = y_indx-box_half_width
+        return x_indx, y_indx, box_width, box_width
 
     def getFiller(self, x_width, y_width, img):
         detached = img.detach()
@@ -302,7 +299,7 @@ class SaliencyMap:
         idx = []
         for adim in list(tnsor.size())[::-1]:
             idx.append((rawmaxidx%adim).item())
-            rawmaxidx = rawmaxidx / adim
+            rawmaxidx = rawmaxidx // adim
         return idx[:-1]
 
     def getCoordinatesOfHighestPixel(self, saliency_map, topk=1):
@@ -311,15 +308,16 @@ class SaliencyMap:
     def getCoordinatesOfHighestPatch(self, saliency_map, box_width, topk=1):
         # Do a convolution to get a sum
         filters = torch.ones(1, 1, box_width, box_width)
-        padding = int(torch.floor(torch.tensor([float(box_width)])/2).item())
+        # padding = int(torch.floor(torch.tensor([float(box_width)])/2).item())
+        padding=0
         stride = box_width
         saliency_map = torch.nn.functional.conv2d(saliency_map.unsqueeze(0), filters, padding=(padding, padding), stride=(stride, stride)).squeeze()
         saliency_map = saliency_map.unsqueeze(0)
         # Get highest pixel after convolution
-        return [element * stride for element in self.getCoordinatesOfHighestPixel(saliency_map, topk)] 
+        return [element * stride + int(stride/2) + 1 for element in self.getCoordinatesOfHighestPixel(saliency_map, topk)] 
         
-    def GetSaliencyMap(self, img_full_path, fileName, layerName, maxCovered=False, box_width= None, topLeft=None, topk=1, plot=True, use_gpu=False):
-        title = fileName
+    def GetSaliencyMap(self, fileName, layerName, maxCovered=False, box_width= None, topLeft=None, topk=1, plot=True, use_gpu=False, generate_all_steps=True):
+        title = ntpath.basename(fileName)
         
         isFine = (layerName != 'coarse')
         self.model.setOutputsOfInterest({
@@ -327,7 +325,7 @@ class SaliencyMap:
             "coarse" : not isFine
         })
         
-        original =  Image.open(os.path.join(img_full_path, fileName))
+        original =  Image.open(fileName)
 
         image_non_normalized = self.getTransformedImage(original, False, False)
 
@@ -346,13 +344,8 @@ class SaliencyMap:
                                          guided=True,
                                          take_max=True, #True
                                          use_gpu=use_gpu)
-        if maxCovered:       
-
-            saliency_map_max_x = torch.max(saliency_map, 1)
-            saliency_map_max_y = torch.max(saliency_map_max_x[0], 1)
-            saliency_map_max_y_indx = saliency_map_max_y[1]
-            saliency_map_max_x_indx = saliency_map_max_x[1][0, saliency_map_max_y_indx]
-
+        title_postfix = ""
+        if maxCovered: 
             if topLeft is not None:
                 saliency_map_max_x_indx = topLeft[0]
                 saliency_map_max_y_indx = topLeft[1]
@@ -365,11 +358,11 @@ class SaliencyMap:
                     saliency_map_max_x_indx.append(saliency_map_max_x_indx_)
                     saliency_map_max_y_indx.append(saliency_map_max_y_indx_)
             
-            title = title + " - Occluded - " + str(box_width)
+            title_postfix = " - Occluded - " + str(box_width)
             for i in range(topk):
                 saliency_map_max_x_indx_, saliency_map_max_y_indx_, x_width, y_width = self.getBoundingBox(saliency_map_max_x_indx[i], saliency_map_max_y_indx[i], box_width)
-                if plot:
-                    print(saliency_map_max_x_indx_, saliency_map_max_y_indx_)
+                # if plot:
+                #     print(saliency_map_max_x_indx_, saliency_map_max_y_indx_)
 
                 filler = self.getFiller(x_width, y_width, image_non_normalized)
 
@@ -379,11 +372,12 @@ class SaliencyMap:
                 image_normalized[0, :, saliency_map_max_x_indx_:saliency_map_max_x_indx_ + x_width,
                                         saliency_map_max_y_indx_:saliency_map_max_y_indx_+y_width] = filler
 
-                title_ = title + " - " + str(i+1) 
+                if generate_all_steps or (i == topk-1):
+                    title_postfix = title_postfix + " - " + str(i+1) 
 
-                heatmap = visualizeAllClasses(backprop, image_normalized, image_non_normalized, [bestClass], guided=True, use_gpu=use_gpu)        
-                A = self.display_map_and_predictions(heatmap[0], title_, image_normalized, layerName, plot=plot, use_gpu=use_gpu)
+                    heatmap = visualizeAllClasses(backprop, image_normalized, image_non_normalized, [bestClass], guided=True, use_gpu=use_gpu)        
+                    A = self.display_map_and_predictions(heatmap[0], title_postfix, title, image_normalized, layerName, plot=plot, use_gpu=use_gpu)
         else:
             heatmap = visualizeAllClasses(backprop, image_normalized, image_non_normalized, [bestClass], guided=True, use_gpu=use_gpu)        
-            A = self.display_map_and_predictions(heatmap[0], title, image_normalized, layerName, plot=plot, use_gpu=use_gpu)
+            A = self.display_map_and_predictions(heatmap[0], title_postfix, title, image_normalized, layerName, plot=plot, use_gpu=use_gpu)
         return saliency_map, A

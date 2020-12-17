@@ -128,11 +128,11 @@ def create_pretrained_model(params):
         
     return model, num_ftrs
 
-def create_model(architecture, params):
+def create_model(architecture, params, device=None):
     model = None
 
     if params["modelType"] != "basic_blackbox":
-        model = CNN_Two_Nets(architecture, params)
+        model = CNN_Two_Nets(architecture, params, device=device)
     else:  
         tl_model = params["tl_model"]
         fc_layers = params["fc_layers"]
@@ -145,8 +145,10 @@ def create_model(architecture, params):
             model.output.add_module("fc", fc)
             
 
-    if torch.cuda.is_available():
-        model = model.cuda()
+    if device is not None:
+        model = model.to(device=device)
+    else:
+        print("Warning! model is on cpu")
     return model
 
 
@@ -212,11 +214,16 @@ def get_layer_by_name(model, layer_name):
 # Build a Hierarchical convolutional Neural Network with conv layers
 class CNN_Two_Nets(nn.Module):  
     # Contructor
-    def __init__(self, architecture, params):
+    def __init__(self, architecture, params, device=None):
         modelType = params["modelType"]
         self.modelType = modelType
         self.numberOfFine = architecture["fine"]
         self.numberOfCoarse = architecture["coarse"] if not modelType=="DSN" else architecture["fine"]
+        self.device=device
+
+        if device is None:
+            print("Creating model on cpu!")
+
         tl_model = params["tl_model"]
         link_layer = params["link_layer"]
         fc_layers = params["fc_layers"]
@@ -267,7 +274,7 @@ class CNN_Two_Nets(nn.Module):
                 resolution = hb_features.shape[2]
                 in_channels = hb_hy_features.shape[1]
                 self.cat_conv2d = get_conv(resolution, resolution, in_channels, in_channels, int(in_channels/2))
-                if torch.cuda.is_available():
+                if self.device is not None:
                     self.cat_conv2d = self.cat_conv2d.cuda()
 
         # g_y block
@@ -275,7 +282,7 @@ class CNN_Two_Nets(nn.Module):
                                        Flatten())
         self.g_y_fc = get_fc(num_ftrs_fine, self.numberOfFine, num_of_layers=fc_layers)
 
-        if torch.cuda.is_available():
+        if device is not None:
             self.g_y = self.g_y.cuda()
             self.h_y = self.h_y.cuda()
             self.g_y_fc = self.g_y_fc.cuda()
@@ -301,7 +308,7 @@ class CNN_Two_Nets(nn.Module):
             result = result['coarse']
         else:
             fineToCoarse = dataset.csv_processor.getFineToCoarseMatrix()
-            if torch.cuda.is_available():
+            if self.device is not None:
                 fineToCoarse = fineToCoarse.cuda()
             result = torch.mm(result['fine'], fineToCoarse)
         return result
@@ -367,15 +374,23 @@ def get_total_adaptive_loss(adaptive_alpha, adaptive_lambda, loss_fine, loss_coa
     c = -(1-adaptive_alpha)/adaptive_lambda
     c_fine = c*loss_fine
     c_coarse = c*loss_coarse
-    n_fine = torch.exp(c_fine*loss_fine)
-    n_coarse = torch.exp(c_coarse*loss_coarse)
-    p = n_fine/ (n_fine + n_coarse)
+    
+    c_diff = c_coarse - c_fine
+    p = 1/(1+ torch.exp(c_diff))
+
+    # Not stable (Nans)
+    # n_fine = torch.exp(c_fine)
+    # print(n_fine)
+    # n_coarse = torch.exp(c_coarse)
+    # print(n_coarse)
+    # p = n_fine/ (n_fine + n_coarse)
+    # print(p)
 
     lambda_fine = adaptive_alpha + (1-adaptive_alpha)*p
     lambda_coarse = (1-adaptive_alpha)*(1-p)
-    return lambda_fine, lambda_coarse
+    return lambda_fine.detach().item(), lambda_coarse.detach().item()
 
-def trainModel(train_loader, validation_loader, params, model, savedModelName, test_loader=None):  
+def trainModel(train_loader, validation_loader, params, model, savedModelName, test_loader=None, device=None):  
     n_epochs = 500
     patience = 10
     learning_rate = params["learning_rate"]
@@ -383,6 +398,9 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     unsupervisedOnTest = params["unsupervisedOnTest"]
     lambda_coarse = params["lambda"]
     lambda_fine = 1
+
+    if trainModel is None:
+        print("training model on CPU!")
     
     adaptive_smoothing_enabled = params["adaptive_smoothing"]
     adaptive_lambda = None if not adaptive_smoothing_enabled else params["adaptive_lambda"]
@@ -412,7 +430,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     print("Training started...")
     start = time.time()
     criterion = nn.CrossEntropyLoss()
-    if torch.cuda.is_available():
+    if device is not None:
         criterion = criterion.cuda()
 
     with tqdm(total=n_epochs, desc="iteration") as bar:
@@ -421,7 +439,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
             model.train()
             for batch in train_loader:
     
-                if torch.cuda.is_available():
+                if device is not None:
                     batch["image"] = batch["image"].cuda()
                     batch["fine"] = batch["fine"].cuda()
                     batch["coarse"] = batch["coarse"].cuda()
@@ -436,16 +454,19 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                             loss_coarse = criterion(z["coarse"], batch["coarse"] if not isDSN else batch["fine"])
                         loss_fine = criterion(z["fine"], batch["fine"])
 
-                        if adaptive_smoothing_enabled:
-                            lambda_fine, lambda_coarse = get_total_adaptive_loss(adaptive_alpha, adaptive_lambda, loss_fine, loss_coarse)
+                        if adaptive_smoothing_enabled and z["coarse"] is not None and not isDSN :
+                            # lambda_fine, lambda_coarse = get_total_adaptive_loss(adaptive_alpha, adaptive_lambda, loss_fine, loss_coarse)
+                            lambda_fine, lambda_coarse = get_total_adaptive_loss(adaptive_alpha, adaptive_lambda, 
+                                loss_fine/len(train_loader.dataset.csv_processor.getFineList()), 
+                                loss_coarse/len(train_loader.dataset.csv_processor.getCoarseList()))
                             adaptive_info = {
                                 'epoch': epoch,
                                 'loss_fine': loss_fine.item(),
                                 'loss_coarse': loss_coarse.item(),
-                                'lambda_fine': lambda_fine.item(),
-                                'lambda_coarse': lambda_coarse.item(),
+                                'lambda_fine': lambda_fine,
+                                'lambda_coarse': lambda_coarse,
                             }
-                            df_adaptive_smoothing = df_adaptive_smoothing.append(pd.DataFrame(adaptive_info, index=[0]), ignore_index = True)
+                            df_adaptive_smoothing = df_adaptive_smoothing.append(pd.DataFrame(adaptive_info, index=[0]), ignore_index = True) 
 
                         loss = lambda_fine*loss_fine + lambda_coarse*loss_coarse
                         loss.backward()
@@ -456,7 +477,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
             if unsupervisedOnTest and test_loader and not isOldBlackbox:
                 for batch in test_loader:
 
-                    if torch.cuda.is_available():
+                    if device is not None:
                         batch["image"] = batch["image"].cuda()
                         batch["fine"] = batch["fine"].cuda()
                         batch["coarse"] = batch["coarse"].cuda()
@@ -473,41 +494,41 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
 
             getCoarse = not isOldBlackbox and not isDSN and not isBlackbox
             
-            predlist_val, lbllist_val = getLoaderPredictionProbabilities(validation_loader, model, params)
+            predlist_val, lbllist_val = getLoaderPredictionProbabilities(validation_loader, model, params, device=device)
             validation_loss = getCrossEntropy(predlist_val, lbllist_val)
             predlist_val, lbllist_val = getPredictions(predlist_val, lbllist_val)
-            validation_fine_f1 = get_f1(predlist_val, lbllist_val)
+            validation_fine_f1 = get_f1(predlist_val, lbllist_val, device=device)
 
             if not isDSN:
-                predlist_val, lbllist_val = getLoaderPredictionProbabilities(validation_loader, model, params, 'coarse')
+                predlist_val, lbllist_val = getLoaderPredictionProbabilities(validation_loader, model, params, 'coarse', device=device)
                 if getCoarse and detailed_reporting:
                     validation_coarse_loss = getCrossEntropy(predlist_val, lbllist_val)
                 if detailed_reporting:
                     predlist_val, lbllist_val = getPredictions(predlist_val, lbllist_val)
-                    validation_coarse_f1 = get_f1(predlist_val, lbllist_val)
+                    validation_coarse_f1 = get_f1(predlist_val, lbllist_val, device=device)
 
-            predlist_train, lbllist_train = getLoaderPredictionProbabilities(train_loader, model, params)
+            predlist_train, lbllist_train = getLoaderPredictionProbabilities(train_loader, model, params, device=device)
             training_loss = getCrossEntropy(predlist_train, lbllist_train)
             predlist_train, lbllist_train = getPredictions(predlist_train, lbllist_train)
-            train_fine_f1 = get_f1(predlist_train, lbllist_train)
+            train_fine_f1 = get_f1(predlist_train, lbllist_train, device=device)
 
             if not isDSN:
-                predlist_train, lbllist_train = getLoaderPredictionProbabilities(train_loader, model, params, 'coarse')
+                predlist_train, lbllist_train = getLoaderPredictionProbabilities(train_loader, model, params, 'coarse', device=device)
                 if getCoarse and detailed_reporting:
                     training_coarse_loss = getCrossEntropy(predlist_train, lbllist_train)
                 if detailed_reporting:
                     predlist_train, lbllist_train = getPredictions(predlist_train, lbllist_train)
-                    training_coarse_f1 = get_f1(predlist_train, lbllist_train)
+                    training_coarse_f1 = get_f1(predlist_train, lbllist_train, device=device)
 
             if test_loader:
-                predlist_test, lbllist_test = getLoaderPredictionProbabilities(test_loader, model, params)
+                predlist_test, lbllist_test = getLoaderPredictionProbabilities(test_loader, model, params, device=device)
                 predlist_test, lbllist_test = getPredictions(predlist_test, lbllist_test)
-                test_fine_f1 = get_f1(predlist_test, lbllist_test)
+                test_fine_f1 = get_f1(predlist_test, lbllist_test, device=device)
                 if not isDSN:
-                    predlist_test, lbllist_test = getLoaderPredictionProbabilities(test_loader, model, params, 'coarse')
+                    predlist_test, lbllist_test = getLoaderPredictionProbabilities(test_loader, model, params, 'coarse', device=device)
                     if detailed_reporting:
                         predlist_test, lbllist_test = getPredictions(predlist_test, lbllist_test)
-                        test_coarse_f1 = get_f1(predlist_test, lbllist_test)
+                        test_coarse_f1 = get_f1(predlist_test, lbllist_test, device=device)
 
             row_information = {
                 'validation_fine_f1': validation_fine_f1,
@@ -570,7 +591,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
             # save results
             df.to_csv(os.path.join(savedModelName, statsFileName))  
 
-            if adaptive_smoothing_enabled:
+            if adaptive_smoothing_enabled and detailed_reporting:
                 df_adaptive_smoothing.to_csv(os.path.join(savedModelName, adaptiveSmoothingFileName))  
             
             with open(os.path.join(savedModelName, timeFileName), 'w', newline='') as myfile:
@@ -588,10 +609,12 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     return df, epochs, time_elapsed
 
 # loads a saved model along with its results
-def loadModel(model, savedModelName):
+def loadModel(model, savedModelName, device=None):
     model.load_state_dict(torch.load(os.path.join(savedModelName, modelFinalCheckpoint), map_location=torch.device('cpu'))) 
-    if torch.cuda.is_available():
+    if device is not None:
         model.cuda()
+    else:
+        print("Model loaded into cpu!")
 
     model.eval()
 
@@ -642,20 +665,23 @@ def getCrossEntropy(predlist, lbllist):
     criterion = nn.CrossEntropyLoss()
     return criterion(predlist, lbllist).item()
 
-def getLoaderPredictionProbabilities(loader, model, params, label="fine"):
+def getLoaderPredictionProbabilities(loader, model, params, label="fine", device=None):
+    if device is None:
+        print("Warning! getLoaderPredictionProbabilities is on cpu")
+    
     # Initialize the prediction and label lists(tensors)
     predlist=torch.zeros(0)
     lbllist=torch.zeros(0, dtype=torch.long)
     isOldBlackbox = (params['modelType'] == "basic_blackbox")
     
-    if torch.cuda.is_available():
+    if device is not None:
         predlist = predlist.cuda()
         lbllist = lbllist.cuda()
 
     model.eval()
     with torch.set_grad_enabled(False):
         for batch in loader:
-            if torch.cuda.is_available():
+            if device is not None:
                 batch["image"] = batch["image"].cuda()
                 batch["fine"] = batch["fine"].cuda()
                 batch["coarse"] = batch["coarse"].cuda()
@@ -668,7 +694,7 @@ def getLoaderPredictionProbabilities(loader, model, params, label="fine"):
                     preds = preds[label]
                 elif label == 'coarse':
                     fineToCoarseMatrix = loader.dataset.csv_processor.getFineToCoarseMatrix()
-                    if torch.cuda.is_available():
+                    if device is not None:
                         fineToCoarseMatrix = fineToCoarseMatrix.cuda()
                     preds = torch.mm(preds['fine'],fineToCoarseMatrix) 
                 else:
@@ -689,29 +715,38 @@ def getPredictions(predlist, lbllist):
     return predlist, lbllist
 
 # Takes predictions
-def get_f1(predlist, lbllist):
-    if torch.cuda.is_available():
+def get_f1(predlist, lbllist, device=None):
+    if device is not None:
         predlist = predlist.cpu()
         lbllist = lbllist.cpu()   
     return f1_score(lbllist, predlist, average='macro')
 
 # Returns the distance between examples in terms of classification cross entropy
 # Augmentation should be disabled
-def get_distance_from_example(dataset, example_1, model, params):
+#TODO: remove this when get_distance_from_example2 works
+def get_distance_from_example(dataset, example_1, model, params, device=None):
     isOldBlackbox = (params['modelType'] == "basic_blackbox")
     criterion = torch.nn.CosineSimilarity()
     dataset_size = len(dataset)
     result = torch.zeros(1, dataset_size)
 
-    with torch.set_grad_enabled(True):
-        z_1 = applyModel(example_1["image"].unsqueeze(0), model)
+    with torch.set_grad_enabled(False):
+        img = example_1["image"]
+        if device is not None:
+           img=img.cuda() 
+        img=img.unsqueeze(0)
+        z_1 = applyModel(img, model)
         if not isOldBlackbox:
             z_1 = z_1['fine']
         z_1 = z_1.detach()
         z_1 = torch.nn.Softmax(dim=1)(z_1)
         for j in range(dataset_size):
             example_2 = dataset[j]
-            z_2 = applyModel(example_2["image"].unsqueeze(0), model)
+            img = example_2["image"]
+            if device is not None:
+                img=img.cuda() 
+            img=img.unsqueeze(0)
+            z_2 = applyModel(img, model)
 
             if not isOldBlackbox:
                 z_2 = z_2['fine']
@@ -725,6 +760,24 @@ def get_distance_from_example(dataset, example_1, model, params):
             result[0, j] = loss
     return result
 
+def get_distance_from_example2(dataset_predProblist, example_1_predProb):
+    criterion = torch.nn.CosineSimilarity()
+    dataset_size = dataset_predProblist.shape[0]
+    result = torch.zeros(1, dataset_size)
+
+    with torch.set_grad_enabled(False):
+        z_1 = example_1_predProb.reshape((1, example_1_predProb.shape[0]))
+        z_1 = torch.nn.Softmax(dim=1)(z_1)
+        for j in range(dataset_size):
+            example_2_predProb = dataset_predProblist[j, :]
+
+            z_2 = example_2_predProb.reshape((1, example_2_predProb.shape[0]))
+            z_2 = torch.nn.Softmax(dim=1)(z_2)
+
+            loss = criterion(z_1, z_2)
+
+            result[0, j] = loss
+    return result
 
 def applyModel(batch, model):
 #     if torch.cuda.is_available():

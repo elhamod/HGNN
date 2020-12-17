@@ -18,12 +18,12 @@ config_plots.global_settings()
 experimetnsFileName = "experiments.csv"
 
     
-def main(cuda, experimentsPath, dataPath, experimentName):
+def main(cuda, experimentsPath, dataPath, experimentName, device=None):
     experimentPathAndName = os.path.join(experimentsPath, experimentName)
     # set cuda
-    if torch.cuda.is_available():
-        print("using cuda", cuda)
-        torch.cuda.set_device(cuda)
+    if device is not None:
+        print("using cuda", device)
+        torch.cuda.set_device(device)
     else:
         print("using cpu")
 
@@ -70,11 +70,11 @@ def main(cuda, experimentsPath, dataPath, experimentName):
                 print(row_information)
 
                 # Train/Load model
-                model = CNN.create_model(architecture, experiment_params)
+                model = CNN.create_model(architecture, experiment_params, device=device)
                 if os.path.exists(CNN.getModelFile(trialName)):
                     print("Model {0} found!".format(trialName))
                 else:
-                    CNN.trainModel(train_loader, validation_loader, experiment_params, model, trialName, test_loader)
+                    CNN.trainModel(train_loader, validation_loader, experiment_params, model, trialName, test_loader, device=device)
 
                 # Add to experiments file
                 if os.path.exists(experimentsFileNameAndPath):
@@ -106,4 +106,4 @@ if __name__ == "__main__":
     parser.add_argument('--data', required=True)
     parser.add_argument('--name', required=True)
     args = parser.parse_args()
-    main(cuda=args.cuda, experimentName=args.name, experimentsPath=args.experiments, dataPath=args.data)
+    main(cuda=args.cuda, experimentName=args.name, experimentsPath=args.experiments, dataPath=args.data, device=args.cuda)

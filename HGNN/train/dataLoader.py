@@ -42,7 +42,7 @@ class FishDataset(Dataset):
             os.makedirs(data_root_suffix)
         # Only valid files are the non-augmented ones 
         self.dataset = torchvision.datasets.ImageFolder(data_root_suffix, is_valid_file=is_valid_file_no_augmentation, transform=transforms.Compose(self.getTransforms()), target_transform=None)
-
+        self.mapFileNameToIndex = {} # This dictionary will make it easy to find the information of an image by its file name.
         if normalizer is not None:
             self.normalizer = normalizer
         else:
@@ -60,7 +60,7 @@ class FishDataset(Dataset):
        
         
         if csv_processor is None:
-            self.csv_processor = CSV_processor(self.data_root, self.suffix, data_path, params)
+            self.csv_processor = CSV_processor(self.data_root, self.suffix)
         else:
             self.csv_processor = csv_processor
 
@@ -125,6 +125,8 @@ class FishDataset(Dataset):
 
         return img
 
+    def getIdxByFileName(self, fileName):
+        return self.mapFileNameToIndex[fileName]
 
     def __getitem__(self, idx):   
         if self.composedTransforms is None:
@@ -133,9 +135,12 @@ class FishDataset(Dataset):
 
         image, target = self.dataset[idx]
         image = image.type(torch.FloatTensor)
-        fileName = self.dataset.samples[idx][0]
-        fileName = os.path.basename(fileName)
+        fileName_full = self.dataset.samples[idx][0]
+        fileName = os.path.basename(fileName_full)
         fileName = re.sub(r'_{}_aug_\d+'.format(self.imageDimension), '', fileName)
+
+        if fileName not in self.mapFileNameToIndex.keys():
+            self.mapFileNameToIndex[fileName] = idx
 
         img_fine_label = self.csv_processor.getFineLabel(fileName)
         img_fine_index = self.csv_processor.getFineList().index(img_fine_label)
@@ -149,6 +154,7 @@ class FishDataset(Dataset):
         return {'image': image, 
                 'fine': img_fine_index, 
                 'fileName': fileName,
+                'fileNameFull': fileName_full,
                 'coarse': matchcoarse_index,} 
 
 
