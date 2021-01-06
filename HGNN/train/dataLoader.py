@@ -212,10 +212,10 @@ class datasetManager:
 
         # create data loaders.
         print("Creating loaders...")
-        self.train_loader = torch.utils.data.DataLoader(self.dataset_train, shuffle=True, batch_size=batchSize, num_workers=num_of_workers)
-        self.validation_loader = torch.utils.data.DataLoader(self.dataset_val, shuffle=True, batch_size=batchSize, num_workers=num_of_workers)
+        self.train_loader = torch.utils.data.DataLoader(self.dataset_train, pin_memory=True, shuffle=True, batch_size=batchSize, num_workers=num_of_workers)
+        self.validation_loader = torch.utils.data.DataLoader(self.dataset_val, pin_memory=True, shuffle=True, batch_size=batchSize, num_workers=num_of_workers)
         self.validation_loader.dataset.toggle_image_loading(augmentation=False, normalization=self.dataset_val.normalization_enabled)
-        self.test_loader = torch.utils.data.DataLoader(self.dataset_test, shuffle=True, batch_size=batchSize, num_workers=num_of_workers)
+        self.test_loader = torch.utils.data.DataLoader(self.dataset_test, pin_memory=True, shuffle=True, batch_size=batchSize, num_workers=num_of_workers)
         self.test_loader.dataset.toggle_image_loading(augmentation=False, normalization=self.dataset_test.normalization_enabled) # Needed so we always get the same prediction accuracy 
         print("Creating loaders... Done.")
         

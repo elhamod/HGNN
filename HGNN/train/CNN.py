@@ -13,14 +13,15 @@ import json
 from tqdm import tqdm
 import math
 
+try:
+    import wandb
+except:
+    print('wandb not found')
+
 from myhelpers.earlystopping import EarlyStopping
+from myhelpers.try_warning import try_running
 from .resnet_cifar import cifar_resnet56
 from .cifar_nin import nin_cifar100
-
-
-
-
-import time
 
 
 modelFinalCheckpoint = 'finalModel.pt'
@@ -35,7 +36,8 @@ epochsFileName = "epochs.csv"
 
 paramsFileName="params.json"
 
-detailed_reporting = True
+WANDB_message="wandb not working"
+
 saved_models_per_iteration_frequency = 1
 
 
@@ -216,6 +218,7 @@ class CNN_Two_Nets(nn.Module):
     # Contructor
     def __init__(self, architecture, params, device=None):
         modelType = params["modelType"]
+        self.noSpeciesBackprop = params["noSpeciesBackprop"]
         self.modelType = modelType
         self.numberOfFine = architecture["fine"]
         self.numberOfCoarse = architecture["coarse"] if not modelType=="DSN" else architecture["fine"]
@@ -325,14 +328,19 @@ class CNN_Two_Nets(nn.Module):
         hb_hy_features = None
         hb_features = None
         if self.h_b is not None:
+            if self.noSpeciesBackprop:
+                hy_features_feed = hy_features.detach()
+            else:
+                hy_features_feed = hy_features
+
             hb_features = self.h_b(x)
             if self.modelType == "HGNN":
-                hb_hy_features = torch.cat((hy_features, hb_features), 1)
+                hb_hy_features = torch.cat((hy_features_feed, hb_features), 1)
                 hb_hy_features =  self.cat_conv2d(hb_hy_features)
             elif self.modelType == "HGNN_cat":
-                hb_hy_features = torch.cat((hy_features, hb_features), 2)
+                hb_hy_features = torch.cat((hy_features_feed, hb_features), 2)
             else:
-                hb_hy_features = hy_features + hb_features
+                hb_hy_features = hy_features_feed + hb_features
 
         else:
             hb_hy_features = hy_features
@@ -376,7 +384,10 @@ def get_total_adaptive_loss(adaptive_alpha, adaptive_lambda, loss_fine, loss_coa
     c_coarse = c*loss_coarse
     
     c_diff = c_coarse - c_fine
-    p = 1/(1+ torch.exp(c_diff))
+    try:
+        p = 1/(1+ torch.exp(c_diff))
+    except:
+        p=0
 
     # Not stable (Nans)
     # n_fine = torch.exp(c_fine)
@@ -390,9 +401,26 @@ def get_total_adaptive_loss(adaptive_alpha, adaptive_lambda, loss_fine, loss_coa
     lambda_coarse = (1-adaptive_alpha)*(1-p)
     return lambda_fine.detach().item(), lambda_coarse.detach().item()
 
-def trainModel(train_loader, validation_loader, params, model, savedModelName, test_loader=None, device=None):  
+def f1_criterion(device):
+    return lambda pred, true : torch.reciprocal(torch.tensor(get_f1(*getPredictions(pred, true), device=device), requires_grad=True))
+
+def escort_function(x, p=2):
+    x_exp = torch.abs(x)**p
+    x_exp_sum = torch.sum(x_exp, 1, keepdim=True)
+    answer = x_exp/x_exp_sum
+
+    return answer
+
+def escort_criterion(device):
+    criterion = nn.KLDivLoss()
+    if device is not None:
+        criterion = criterion.cuda()
+    return lambda pred, true : criterion((escort_function(pred)+ 1e-7).log(), nn.functional.one_hot(true, num_classes=pred.shape[1]).float())
+
+
+def trainModel(train_loader, validation_loader, params, model, savedModelName, test_loader=None, device=None, detailed_reporting=False):  
     n_epochs = 500
-    patience = 10
+    patience = 5
     learning_rate = params["learning_rate"]
     modelType = params["modelType"]
     unsupervisedOnTest = params["unsupervisedOnTest"]
@@ -430,6 +458,8 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     print("Training started...")
     start = time.time()
     criterion = nn.CrossEntropyLoss()
+    # criterion = f1_criterion(device)
+    # criterion = escort_criterion(device)
     if device is not None:
         criterion = criterion.cuda()
 
@@ -437,7 +467,8 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
         epochs = 0
         for epoch in range(n_epochs):
             model.train()
-            for batch in train_loader:
+            for i, batch in enumerate(train_loader):
+                absolute_batch = i + epoch*len(train_loader)
     
                 if device is not None:
                     batch["image"] = batch["image"].cuda()
@@ -454,28 +485,35 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                             loss_coarse = criterion(z["coarse"], batch["coarse"] if not isDSN else batch["fine"])
                         loss_fine = criterion(z["fine"], batch["fine"])
 
+                        adaptive_info = {
+                            'batch': absolute_batch,
+                            'epoch': epoch,
+                            'loss_fine': loss_fine.item(),
+                            'loss_coarse': loss_coarse.item(),
+                            'lambda_fine': lambda_fine,
+                            'lambda_coarse': lambda_coarse,
+                        }
                         if adaptive_smoothing_enabled and z["coarse"] is not None and not isDSN :
                             # lambda_fine, lambda_coarse = get_total_adaptive_loss(adaptive_alpha, adaptive_lambda, loss_fine, loss_coarse)
                             lambda_fine, lambda_coarse = get_total_adaptive_loss(adaptive_alpha, adaptive_lambda, 
                                 loss_fine/len(train_loader.dataset.csv_processor.getFineList()), 
                                 loss_coarse/len(train_loader.dataset.csv_processor.getCoarseList()))
-                            adaptive_info = {
-                                'epoch': epoch,
-                                'loss_fine': loss_fine.item(),
-                                'loss_coarse': loss_coarse.item(),
-                                'lambda_fine': lambda_fine,
-                                'lambda_coarse': lambda_coarse,
-                            }
+                            adaptive_info['lambda_fine']= lambda_fine
+                            adaptive_info['lambda_coarse']= lambda_coarse
                             df_adaptive_smoothing = df_adaptive_smoothing.append(pd.DataFrame(adaptive_info, index=[0]), ignore_index = True) 
 
                         loss = lambda_fine*loss_fine + lambda_coarse*loss_coarse
                         loss.backward()
+                        wandb_dic = {"loss": loss.item()}
+                        wandb_dic = {**wandb_dic, **adaptive_info} 
+                        try_running(lambda : wandb.log(wandb_dic), WANDB_message)
                     else:    
                         loss_fine = criterion(z, batch["fine"])
                         loss_fine.backward()
+                        try_running(lambda : wandb.log({"loss": loss_fine, "batch": absolute_batch}, step=epoch), WANDB_message)
                     optimizer.step()
             if unsupervisedOnTest and test_loader and not isOldBlackbox:
-                for batch in test_loader:
+                for i, batch in enumerate(test_loader):
 
                     if device is not None:
                         batch["image"] = batch["image"].cuda()
@@ -501,9 +539,8 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
 
             if not isDSN:
                 predlist_val, lbllist_val = getLoaderPredictionProbabilities(validation_loader, model, params, 'coarse', device=device)
-                if getCoarse and detailed_reporting:
+                if getCoarse:
                     validation_coarse_loss = getCrossEntropy(predlist_val, lbllist_val)
-                if detailed_reporting:
                     predlist_val, lbllist_val = getPredictions(predlist_val, lbllist_val)
                     validation_coarse_f1 = get_f1(predlist_val, lbllist_val, device=device)
 
@@ -512,25 +549,24 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
             predlist_train, lbllist_train = getPredictions(predlist_train, lbllist_train)
             train_fine_f1 = get_f1(predlist_train, lbllist_train, device=device)
 
-            if not isDSN:
+            if detailed_reporting and not isDSN:
                 predlist_train, lbllist_train = getLoaderPredictionProbabilities(train_loader, model, params, 'coarse', device=device)
-                if getCoarse and detailed_reporting:
+                if getCoarse:
                     training_coarse_loss = getCrossEntropy(predlist_train, lbllist_train)
-                if detailed_reporting:
                     predlist_train, lbllist_train = getPredictions(predlist_train, lbllist_train)
                     training_coarse_f1 = get_f1(predlist_train, lbllist_train, device=device)
 
-            if test_loader:
+            if test_loader and detailed_reporting:
                 predlist_test, lbllist_test = getLoaderPredictionProbabilities(test_loader, model, params, device=device)
                 predlist_test, lbllist_test = getPredictions(predlist_test, lbllist_test)
                 test_fine_f1 = get_f1(predlist_test, lbllist_test, device=device)
                 if not isDSN:
                     predlist_test, lbllist_test = getLoaderPredictionProbabilities(test_loader, model, params, 'coarse', device=device)
-                    if detailed_reporting:
-                        predlist_test, lbllist_test = getPredictions(predlist_test, lbllist_test)
-                        test_coarse_f1 = get_f1(predlist_test, lbllist_test, device=device)
+                    predlist_test, lbllist_test = getPredictions(predlist_test, lbllist_test)
+                    test_coarse_f1 = get_f1(predlist_test, lbllist_test, device=device)
 
             row_information = {
+                'epoch': epoch,
                 'validation_fine_f1': validation_fine_f1,
                 'training_fine_f1': train_fine_f1,
                 'test_fine_f1': test_fine_f1 if test_loader and detailed_reporting else None,
@@ -545,6 +581,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
             }
             
             df = df.append(pd.DataFrame(row_information, index=[0]), ignore_index = True)
+            try_running(lambda : wandb.log(row_information), WANDB_message)
             
             # Update the bar
             bar.set_postfix(val=row_information["validation_fine_f1"], 
@@ -563,7 +600,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                     pass
 
             # early stopping
-            early_stopping(row_information['validation_loss'], epoch, model)
+            early_stopping(1/row_information['validation_fine_f1'], epoch, model)
 
             epochs = epochs + 1
             if early_stopping.early_stop:

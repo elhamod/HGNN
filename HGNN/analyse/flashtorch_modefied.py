@@ -130,7 +130,21 @@ class Backprop:
         self.model = model
         self.model.eval()
         self.gradients = None
+        self.handle_forward=[]
+        self.handle_backward=[]
+        self.handle_conv=[]
+        self.relu_registered = False
         self._register_conv_hook()
+
+    def __del__(self): 
+        for i in self.handle_forward:
+            i.remove()
+        for i in self.handle_backward:
+            i.remove()
+        for i in self.handle_conv:
+            i.remove()
+        self.gradients = None
+        self.relu_outputs = {}
 
     def calculate_gradients(self,
                             input_,
@@ -156,9 +170,10 @@ class Backprop:
             gradients (torch.Tensor): With shape :math:`(C, H, W)`.
         """
 
-        if guided:
-            self.relu_outputs = []
+        self.relu_outputs = {}
+        if guided and not self.relu_registered:
             self._register_relu_hooks()
+            self.relu_registered = True
 
         if torch.cuda.is_available() and use_gpu:
             # self.model = self.model.to('cuda')
@@ -167,7 +182,6 @@ class Backprop:
         self.model.zero_grad()
 
         self.gradients = torch.zeros(input_.shape)
-
 
         output = self.model(input_)
         target = torch.FloatTensor(1, output.shape[-1]).zero_()
@@ -189,7 +203,6 @@ class Backprop:
         
         if take_max:
             # Take the maximum across colour channels
-
             gradients = gradients.max(dim=0, keepdim=True)[0]
 
         return gradients
@@ -206,11 +219,10 @@ class Backprop:
         for _, module in self.model.named_modules():
             if isinstance(module, nn.modules.conv.Conv2d) and \
                     module.in_channels == 3:
-                module.register_backward_hook(_record_gradients)
+                self.handle_conv.append(module.register_backward_hook(_record_gradients))
                 break
 
     def _register_relu_hooks(self):
-        self.relu_outputs = {}
         def _record_output(module, input_, output):
             self.relu_outputs[hash(module)] = output
 
@@ -222,8 +234,8 @@ class Backprop:
 
         for _, module in self.model.named_modules():
             if isinstance(module, nn.ReLU):
-                module.register_forward_hook(_record_output)
-                module.register_backward_hook(_clip_gradients)
+                self.handle_forward.append(module.register_forward_hook(_record_output))
+                self.handle_backward.append(module.register_backward_hook(_clip_gradients))
 
 
 ########################
@@ -363,7 +375,6 @@ class SaliencyMap:
                 saliency_map_max_x_indx_, saliency_map_max_y_indx_, x_width, y_width = self.getBoundingBox(saliency_map_max_x_indx[i], saliency_map_max_y_indx[i], box_width)
                 # if plot:
                 #     print(saliency_map_max_x_indx_, saliency_map_max_y_indx_)
-
                 filler = self.getFiller(x_width, y_width, image_non_normalized)
 
                 image_non_normalized[0, :, saliency_map_max_x_indx_:saliency_map_max_x_indx_ + x_width,
@@ -371,7 +382,6 @@ class SaliencyMap:
 
                 image_normalized[0, :, saliency_map_max_x_indx_:saliency_map_max_x_indx_ + x_width,
                                         saliency_map_max_y_indx_:saliency_map_max_y_indx_+y_width] = filler
-
                 if generate_all_steps or (i == topk-1):
                     title_postfix = title_postfix + " - " + str(i+1) 
 
@@ -380,4 +390,9 @@ class SaliencyMap:
         else:
             heatmap = visualizeAllClasses(backprop, image_normalized, image_non_normalized, [bestClass], guided=True, use_gpu=use_gpu)        
             A = self.display_map_and_predictions(heatmap[0], title_postfix, title, image_normalized, layerName, plot=plot, use_gpu=use_gpu)
+        
+        # We need this to clear the hooks. del backprop is not working for some reason.
+        backprop.__del__() 
+        backprop = None
+
         return saliency_map, A
