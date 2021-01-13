@@ -1,6 +1,7 @@
 This repo is for Fish classification.
 
 To start:
+- You will need to clone https://github.com/elhamod/myhelpers to your machine
 - Have your data with metadata.csv in a directory.
 - Create a config file using HGNN/train/ConfigParserWriter-*
 - train a model using train.py. e.g.: python3 train.py --name="learningRateTest" --experiments="/home/elhamod/HGNN/experiments/" --data="/data/BGNN_data"
