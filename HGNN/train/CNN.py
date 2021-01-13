@@ -443,7 +443,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     
     df = pd.DataFrame()
     
-    if not os.path.exists(savedModelName):
+if not os.path.exists(savedModelName):
         os.makedirs(savedModelName)
 
     saved_models_per_iteration = os.path.join(savedModelName, saved_models_per_iteration_folder)
@@ -488,8 +488,8 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                         adaptive_info = {
                             'batch': absolute_batch,
                             'epoch': epoch,
-                            'loss_fine': loss_fine.item(),
-                            'loss_coarse': loss_coarse.item(),
+                            'loss_fine': loss_fine.item() if torch.is_tensor(loss_fine) else loss_fine,
+                            'loss_coarse': loss_coarse.item() if torch.is_tensor(loss_coarse) else loss_coarse,
                             'lambda_fine': lambda_fine,
                             'lambda_coarse': lambda_coarse,
                         }

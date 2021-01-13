@@ -6,6 +6,7 @@ import hashlib
 import copy
 import pandas as pd
 import pickle
+import math
     
 #TODO: All experiments wit datasplit params having augmented should have it removed.
 # This is because being augmented should have same split if it is not augmented.
@@ -149,18 +150,22 @@ class ConfigParser:
     def fixExperimentParams(self, params_):
         params= copy.copy(params_)
 
-        params["batchSize"] = params["batchSize"] if ("batchSize" in params) else 32
-        params["learning_rate"] = params["learning_rate"] if ("learning_rate" in params) else 0.0005
-        params["numOfTrials"] = params["numOfTrials"] if ("numOfTrials" in params) else 1
-        params["fc_layers"] = params["fc_layers"] if ("fc_layers" in params) else 1
-        params["modelType"] = params["modelType"] if ("modelType" in params) else "BB"
-        params["lambda"] = params["lambda"] if ("lambda" in params) else 1
-        params["tl_model"] = params["tl_model"] if ("tl_model" in params) else "ResNet18"
-        params["augmented"] = params["augmented"] if ("augmented" in params) else False
-        params["img_res"] = params["img_res"] if ("img_res" in params) else 224
-        params["link_layer"] = params["link_layer"] if ("link_layer" in params) else "layer1"
-        params["adaptive_smoothing"] = params["adaptive_smoothing"] if ("adaptive_smoothing" in params) else False
-        params["adaptive_lambda"] = params["adaptive_lambda"] if ("adaptive_lambda" in params) else 0.1
-        params["adaptive_alpha"] = params["adaptive_alpha"] if ("adaptive_alpha" in params) else 0.9
+        params["batchSize"] = params["batchSize"] if check_valid(params,"batchSize") else 32
+        params["learning_rate"] = params["learning_rate"] if check_valid(params,"learning_rate") else 0.0005
+        params["numOfTrials"] = params["numOfTrials"] if check_valid(params,"numOfTrials") else 1
+        params["fc_layers"] = params["fc_layers"] if check_valid(params,"fc_layers") else 1
+        params["modelType"] = params["modelType"] if check_valid(params,"modelType") else "BB"
+        params["lambda"] = params["lambda"] if check_valid(params,"lambda") else 1
+        params["tl_model"] = params["tl_model"] if check_valid(params,"tl_model") else "ResNet18"
+        params["augmented"] = params["augmented"] if check_valid(params,"augmented") else False
+        params["img_res"] = params["img_res"] if check_valid(params,"img_res") else 224
+        params["link_layer"] = params["link_layer"] if check_valid(params,"link_layer") else "layer1"
+        params["adaptive_smoothing"] = params["adaptive_smoothing"] if check_valid(params,"adaptive_smoothing") else False
+        params["adaptive_lambda"] = params["adaptive_lambda"] if check_valid(params,"adaptive_lambda") else 0.1
+        params["adaptive_alpha"] = params["adaptive_alpha"] if check_valid(params,"adaptive_alpha") else 0.9
+        params["noSpeciesBackprop"] = params["noSpeciesBackprop"] if check_valid(params,"noSpeciesBackprop") else False
         
         return params
+
+def check_valid(params, key):
+     return (key in params) and (isinstance(params[key], str)or not math.isnan(params[key]))

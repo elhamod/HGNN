@@ -50,44 +50,14 @@ class CNN_wrapper(torch.nn.Module):
 from flashtorch.utils import (denormalize,
                               format_for_plotting,
                               standardize_and_clip)
-
-def visualizeOverlay(self, input_, denormalizedInput_, target_class, guided=False, use_gpu=False, cmap='viridis', alpha=.5):
-
-        # Calculate gradients
-        max_gradients = self.calculate_gradients(input_,
-                                                 target_class,
-                                                 guided=guided,
-                                                 take_max=False,
-                                                 use_gpu=use_gpu)
-        clipped_gradients = format_for_plotting(standardize_and_clip(max_gradients,
-                         saturation=1))
-        #return two entries of type (image, cmap, alpha)
-        return [(format_for_plotting(denormalizedInput_), None, None),
-              (clipped_gradients,
-               cmap,
-               alpha)]
-    
-def visualizeHeatmap(self, input_, target_class, guided=False, use_gpu=False, cmap='viridis', alpha=.5):
-
-        # Calculate gradients
-        max_gradients = self.calculate_gradients(input_,
-                                                 target_class,
-                                                 guided=guided,
-                                                 take_max=True, # We are not taking max because the interplay between channels is important!
-                                                 use_gpu=use_gpu)
-        #return image, cmap, alpha
-        output = (format_for_plotting(standardize_and_clip(max_gradients,
-                         saturation=1)),
-               cmap,
-               alpha)
-        return [output,output]
     
 
-def visualizeAllClasses(self, image_normalized, input_non_normalized, listOfClasses, guided=False, use_gpu=False, cmap='viridis', alpha=.5):
-    w = input_non_normalized.shape[3]
-    h = input_non_normalized.shape[2]
+def visualizeAllClasses(self, image_normalized, listOfClasses, guided=False, use_gpu=False):
+    w = image_normalized.shape[3]
+    h = image_normalized.shape[2]
+    colors = image_normalized.shape[1]
     
-    result = torch.zeros(1, 3, h, w*len(listOfClasses))
+    result = torch.zeros(1, colors, h, w*len(listOfClasses))
     idx = 0
     for i in listOfClasses:
         result[:, :, :, idx*w:(idx+1)*w] = self.calculate_gradients(image_normalized,
@@ -97,13 +67,9 @@ def visualizeAllClasses(self, image_normalized, input_non_normalized, listOfClas
                                          use_gpu=use_gpu)
         idx = idx + 1
         
-    stdized = standardize_and_clip(result)
-    stdized = torch.cat((stdized, input_non_normalized), 3)
+    stdized = standardize_and_clip(result,saturation=0.4)
     
-    output = (format_for_plotting(stdized),
-       cmap,
-       alpha)
-    return output
+    return stdized
     
 #############################################################
 
@@ -245,6 +211,7 @@ from torchvision import transforms as torchvision_transforms
 from PIL import Image
 import PlotNetwork
 import matplotlib.pyplot as plt
+import numpy as np
 
 class SaliencyMap:
     def __init__(self, dataset, model, experimentName, trial_hash, experiment_params):
@@ -253,17 +220,22 @@ class SaliencyMap:
         self.experimentName = experimentName
         self.trial_hash = trial_hash
         self.experiment_params = experiment_params
+
+    def getGrayScale(self, img_numpy):
+        result = np.dot(img_numpy, [0.299, 0.587, 0.144])
+        return result
     
-    def display_map_and_predictions(self, heatmap, fileName_postfix, fileName, img, layerName, plot=True, use_gpu=False):
+    def display_map_and_predictions(self, heatmap, image_non_normalized, fileName_postfix, fileName, img, layerName, plot=True, use_gpu=False):
         title = fileName.replace('_', '\_')
         if plot:
             fig = plt.figure(figsize=(8, 2.5), dpi= 300)
-
-            plt.imshow(heatmap.cpu().detach().numpy()) # [:, :, 2] to show a channel
+            
+            plt.imshow(self.getGrayScale(format_for_plotting(image_non_normalized).cpu().detach().numpy()),cmap='gray', alpha=0.6) # [:, :, 2] to show a channel
+            plt.imshow(self.getGrayScale(format_for_plotting(heatmap).cpu().detach().numpy()), cmap='seismic', alpha=0.5)
             plt.xticks([])
             plt.yticks([])
 
-            fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+            fig.tight_layout()
             fig.show()
             path = os.path.join(self.experimentName, "models", self.trial_hash, 'saliency_map', fileName)
             if not os.path.exists(path):
@@ -299,11 +271,11 @@ class SaliencyMap:
         return x_indx, y_indx, box_width, box_width
 
     def getFiller(self, x_width, y_width, img):
+        dim = img.shape[1]
         detached = img.detach()
-        filler = torch.zeros((1, 3,x_width, y_width))
-        filler[0, 0, :, :] = detached[0, 0, 0, 0]
-        filler[0, 1, :, :] = detached[0, 1, 0, 0]
-        filler[0, 2, :, :] = detached[0, 2, 0, 0]
+        filler = torch.zeros((1, dim,x_width, y_width))
+        for i in range(dim):
+            filler[0, i, :, :] = detached[0, i, 0, 0]
         return filler
     
     def getCoordinatedOfHighest(self, tnsor, topk=1):
@@ -385,11 +357,11 @@ class SaliencyMap:
                 if generate_all_steps or (i == topk-1):
                     title_postfix = title_postfix + " - " + str(i+1) 
 
-                    heatmap = visualizeAllClasses(backprop, image_normalized, image_non_normalized, [bestClass], guided=True, use_gpu=use_gpu)        
-                    A = self.display_map_and_predictions(heatmap[0], title_postfix, title, image_normalized, layerName, plot=plot, use_gpu=use_gpu)
+                    heatmap = visualizeAllClasses(backprop, image_normalized, [bestClass], guided=True, use_gpu=use_gpu)        
+                    A = self.display_map_and_predictions(heatmap, image_non_normalized, title_postfix, title, image_normalized, layerName, plot=plot, use_gpu=use_gpu)
         else:
-            heatmap = visualizeAllClasses(backprop, image_normalized, image_non_normalized, [bestClass], guided=True, use_gpu=use_gpu)        
-            A = self.display_map_and_predictions(heatmap[0], title_postfix, title, image_normalized, layerName, plot=plot, use_gpu=use_gpu)
+            heatmap = visualizeAllClasses(backprop, image_normalized, [bestClass], guided=True, use_gpu=use_gpu)        
+            A = self.display_map_and_predictions(heatmap, image_non_normalized, title_postfix, title, image_normalized, layerName, plot=plot, use_gpu=use_gpu)
         
         # We need this to clear the hooks. del backprop is not working for some reason.
         backprop.__del__() 
