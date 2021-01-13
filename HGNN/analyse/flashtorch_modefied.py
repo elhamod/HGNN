@@ -2,10 +2,18 @@ import warnings
 
 import torch
 import torch.nn as nn
+<<<<<<< HEAD
 
 defaultOutputs = {
     "species": True,
     "genus" : False
+=======
+import ntpath
+
+defaultOutputs = {
+    "fine": True,
+    "coarse" : True
+>>>>>>> Loss-surface
 }
 
 
@@ -18,14 +26,22 @@ class CNN_wrapper(torch.nn.Module):
         super(CNN_wrapper, self).__init__()
         self.model = model
         self.dataset= dataset
+<<<<<<< HEAD
         self.useHierarchy = params["useHeirarchy"]
         self.setOutputsOfInterest(defaultOutputs)
+=======
+        self.setOutputsOfInterest({
+            "fine": True,
+            "coarse" : False
+            })
+>>>>>>> Loss-surface
     
     def setOutputsOfInterest(self, outputs):
         self.outputs = outputs
         
     # Prediction
     def forward(self, x):
+<<<<<<< HEAD
         if self.useHierarchy:
             result = self.model.activations(x, self.outputs)
             if self.outputs['species']:
@@ -36,6 +52,20 @@ class CNN_wrapper(torch.nn.Module):
             result = self.model(x)
             if self.outputs['genus']:
                 result = torch.mm(result, self.dataset.getSpeciesToGenusMatrix())
+=======
+        if torch.cuda.is_available():
+            x = x.cuda()
+
+        try:
+            result = self.model.activations(x, defaultOutputs)
+        except:
+            result = self.model(x)
+
+        if self.outputs['fine']:
+            result = result['fine']
+        elif self.outputs['coarse']:
+            result =  self.model.get_coarse(x, self.dataset)
+>>>>>>> Loss-surface
         return result
     
     
@@ -45,6 +75,7 @@ class CNN_wrapper(torch.nn.Module):
 from flashtorch.utils import (denormalize,
                               format_for_plotting,
                               standardize_and_clip)
+<<<<<<< HEAD
 
 def visualizeOverlay(self, input_, denormalizedInput_, target_class, guided=False, use_gpu=False, cmap='viridis', alpha=.5):
 
@@ -83,6 +114,16 @@ def visualizeAllClasses(self, image_normalized, input_non_normalized, listOfClas
     h = input_non_normalized.shape[2]
     
     result = torch.zeros(1, 3, h, w*len(listOfClasses))
+=======
+    
+
+def visualizeAllClasses(self, image_normalized, listOfClasses, guided=False, use_gpu=False):
+    w = image_normalized.shape[3]
+    h = image_normalized.shape[2]
+    colors = image_normalized.shape[1]
+    
+    result = torch.zeros(1, colors, h, w*len(listOfClasses))
+>>>>>>> Loss-surface
     idx = 0
     for i in listOfClasses:
         result[:, :, :, idx*w:(idx+1)*w] = self.calculate_gradients(image_normalized,
@@ -92,6 +133,7 @@ def visualizeAllClasses(self, image_normalized, input_non_normalized, listOfClas
                                          use_gpu=use_gpu)
         idx = idx + 1
         
+<<<<<<< HEAD
     stdized = standardize_and_clip(result)
     stdized = torch.cat((stdized, input_non_normalized), 3)
     
@@ -99,6 +141,11 @@ def visualizeAllClasses(self, image_normalized, input_non_normalized, listOfClas
        cmap,
        alpha)
     return output
+=======
+    stdized = standardize_and_clip(result,saturation=0.4)
+    
+    return stdized
+>>>>>>> Loss-surface
     
 #############################################################
 
@@ -125,8 +172,27 @@ class Backprop:
         self.model = model
         self.model.eval()
         self.gradients = None
+<<<<<<< HEAD
         self._register_conv_hook()
 
+=======
+        self.handle_forward=[]
+        self.handle_backward=[]
+        self.handle_conv=[]
+        self.relu_registered = False
+        self._register_conv_hook()
+
+    def __del__(self): 
+        for i in self.handle_forward:
+            i.remove()
+        for i in self.handle_backward:
+            i.remove()
+        for i in self.handle_conv:
+            i.remove()
+        self.gradients = None
+        self.relu_outputs = {}
+
+>>>>>>> Loss-surface
     def calculate_gradients(self,
                             input_,
                             target_class=None,
@@ -151,18 +217,29 @@ class Backprop:
             gradients (torch.Tensor): With shape :math:`(C, H, W)`.
         """
 
+<<<<<<< HEAD
         if guided:
             self.relu_outputs = []
             self._register_relu_hooks()
 
         if torch.cuda.is_available() and use_gpu:
             self.model = self.model.to('cuda')
+=======
+        self.relu_outputs = {}
+        if guided and not self.relu_registered:
+            self._register_relu_hooks()
+            self.relu_registered = True
+
+        if torch.cuda.is_available() and use_gpu:
+            # self.model = self.model.to('cuda')
+>>>>>>> Loss-surface
             input_ = input_.to('cuda')
 
         self.model.zero_grad()
 
         self.gradients = torch.zeros(input_.shape)
 
+<<<<<<< HEAD
 
         output = self.model(input_)
 #         print('output',output)
@@ -184,14 +261,28 @@ class Backprop:
 #                 'the gradient w.r.t. the predicted class.'
 #             ))
 
+=======
+        output = self.model(input_)
+        target = torch.FloatTensor(1, output.shape[-1]).zero_()
+
+        if torch.cuda.is_available():
+            target = target.to('cuda')
+
+>>>>>>> Loss-surface
         # Set the element at top class index to be 1
 
         target[0][target_class] = 1 # top_class
 
+<<<<<<< HEAD
 #         Calculate gradients of the target class output w.r.t. input_
 
         output.backward(gradient=target, retain_graph = True)
 #         output.backward(gradient=torch.ones(output.size()))
+=======
+        # Calculate gradients of the target class output w.r.t. input_
+
+        output.backward(gradient=target, retain_graph = True)
+>>>>>>> Loss-surface
 
         # Detach the gradients from the graph and move to cpu
 
@@ -199,7 +290,10 @@ class Backprop:
         
         if take_max:
             # Take the maximum across colour channels
+<<<<<<< HEAD
 
+=======
+>>>>>>> Loss-surface
             gradients = gradients.max(dim=0, keepdim=True)[0]
 
         return gradients
@@ -216,11 +310,18 @@ class Backprop:
         for _, module in self.model.named_modules():
             if isinstance(module, nn.modules.conv.Conv2d) and \
                     module.in_channels == 3:
+<<<<<<< HEAD
                 module.register_backward_hook(_record_gradients)
                 break
 
     def _register_relu_hooks(self):
         self.relu_outputs = {}
+=======
+                self.handle_conv.append(module.register_backward_hook(_record_gradients))
+                break
+
+    def _register_relu_hooks(self):
+>>>>>>> Loss-surface
         def _record_output(module, input_, output):
             self.relu_outputs[hash(module)] = output
 
@@ -232,8 +333,13 @@ class Backprop:
 
         for _, module in self.model.named_modules():
             if isinstance(module, nn.ReLU):
+<<<<<<< HEAD
                 module.register_forward_hook(_record_output)
                 module.register_backward_hook(_clip_gradients)
+=======
+                self.handle_forward.append(module.register_forward_hook(_record_output))
+                self.handle_backward.append(module.register_backward_hook(_clip_gradients))
+>>>>>>> Loss-surface
 
 
 ########################
@@ -243,6 +349,7 @@ from torchvision import transforms as torchvision_transforms
 from PIL import Image
 import PlotNetwork
 import matplotlib.pyplot as plt
+<<<<<<< HEAD
 
 class SaliencyMap:
     def __init__(self, dataset, model, experimentName, experiment_params):
@@ -275,15 +382,68 @@ class SaliencyMap:
 
     def getTransformedImage(self, img, augmentation, normalization):
         augmentation2, normalization2 = self.dataset.toggle_image_loading(augmentation=augmentation, normalization=normalization)
+=======
+import numpy as np
+
+class SaliencyMap:
+    def __init__(self, dataset, model, experimentName, trial_hash, experiment_params):
+        self.dataset = dataset
+        self.model = model
+        self.experimentName = experimentName
+        self.trial_hash = trial_hash
+        self.experiment_params = experiment_params
+
+    def getGrayScale(self, img_numpy):
+        result = np.dot(img_numpy, [0.299, 0.587, 0.144])
+        return result
+    
+    def display_map_and_predictions(self, heatmap, image_non_normalized, fileName_postfix, fileName, img, layerName, plot=True, use_gpu=False):
+        title = fileName.replace('_', '\_')
+        if plot:
+            fig = plt.figure(figsize=(8, 2.5), dpi= 300)
+            
+            plt.imshow(self.getGrayScale(format_for_plotting(image_non_normalized).cpu().detach().numpy()),cmap='gray', alpha=0.6) # [:, :, 2] to show a channel
+            plt.imshow(self.getGrayScale(format_for_plotting(heatmap).cpu().detach().numpy()), cmap='seismic', alpha=0.5)
+            plt.xticks([])
+            plt.yticks([])
+
+            fig.tight_layout()
+            fig.show()
+            path = os.path.join(self.experimentName, "models", self.trial_hash, 'saliency_map', fileName)
+            if not os.path.exists(path):
+                os.makedirs(path)
+            fig.savefig(os.path.join(path,fileName+fileName_postfix+".pdf"), bbox_inches = 'tight',
+    pad_inches = 0)
+            # fig.suptitle("Saliency Map - " + title)
+
+        if torch.cuda.is_available() and use_gpu:
+            img = img.cuda()
+
+        if plot:
+            activatins_rows = 1
+            A = PlotNetwork.plot_activations(self.model.model, layerName, img, path, self.experiment_params, self.dataset, fileName+fileName_postfix, activatins_rows)
+        else:
+            activation = PlotNetwork.model_activations(self.model.model, layerName, self.dataset)
+            A = activation(img)
+        return A
+
+    def getTransformedImage(self, img, augmentation, normalization):
+        augmentation2, normalization2, pad2 = self.dataset.toggle_image_loading(augmentation=augmentation, normalization=normalization)
+>>>>>>> Loss-surface
         transforms = self.dataset.getTransforms()
         composedTransforms = torchvision_transforms.Compose(transforms)
         img_clone = composedTransforms(img)
         img_clone = img_clone.unsqueeze(0)
+<<<<<<< HEAD
         self.dataset.toggle_image_loading(augmentation2, normalization2)
+=======
+        self.dataset.toggle_image_loading(augmentation2, normalization2, pad2)
+>>>>>>> Loss-surface
         return img_clone
 
     def getBoundingBox(self, x_indx, y_indx, box_width):
         box_half_width = int(box_width/2)
+<<<<<<< HEAD
         x_indx2 = x_indx+box_half_width
         y_indx2 = y_indx+box_half_width
         x_indx = x_indx-box_half_width if x_indx-box_half_width >=0 else 0
@@ -300,6 +460,18 @@ class SaliencyMap:
         filler[0, 1, :, :] = detached[0, 1, 0, 0]
         filler[0, 2, :, :] = detached[0, 2, 0, 0]
 #         img.requires_grad = True
+=======
+        x_indx = x_indx-box_half_width
+        y_indx = y_indx-box_half_width
+        return x_indx, y_indx, box_width, box_width
+
+    def getFiller(self, x_width, y_width, img):
+        dim = img.shape[1]
+        detached = img.detach()
+        filler = torch.zeros((1, dim,x_width, y_width))
+        for i in range(dim):
+            filler[0, i, :, :] = detached[0, i, 0, 0]
+>>>>>>> Loss-surface
         return filler
     
     def getCoordinatedOfHighest(self, tnsor, topk=1):
@@ -307,7 +479,11 @@ class SaliencyMap:
         idx = []
         for adim in list(tnsor.size())[::-1]:
             idx.append((rawmaxidx%adim).item())
+<<<<<<< HEAD
             rawmaxidx = rawmaxidx / adim
+=======
+            rawmaxidx = rawmaxidx // adim
+>>>>>>> Loss-surface
         return idx[:-1]
 
     def getCoordinatesOfHighestPixel(self, saliency_map, topk=1):
@@ -316,6 +492,7 @@ class SaliencyMap:
     def getCoordinatesOfHighestPatch(self, saliency_map, box_width, topk=1):
         # Do a convolution to get a sum
         filters = torch.ones(1, 1, box_width, box_width)
+<<<<<<< HEAD
         padding = int(torch.floor(torch.tensor([float(box_width)])/2).item())
         stride = box_width
         saliency_map = torch.nn.functional.conv2d(saliency_map.unsqueeze(0).cuda(), filters, padding=(padding, padding), stride=(stride, stride)).squeeze()
@@ -334,13 +511,40 @@ class SaliencyMap:
         })
         
         original =  Image.open(os.path.join(img_full_path, fileName))
+=======
+        # padding = int(torch.floor(torch.tensor([float(box_width)])/2).item())
+        padding=0
+        stride = box_width
+        saliency_map = torch.nn.functional.conv2d(saliency_map.unsqueeze(0), filters, padding=(padding, padding), stride=(stride, stride)).squeeze()
+        saliency_map = saliency_map.unsqueeze(0)
+        # Get highest pixel after convolution
+        return [element * stride + int(stride/2) + 1 for element in self.getCoordinatesOfHighestPixel(saliency_map, topk)] 
+        
+    def GetSaliencyMap(self, fileName, layerName, maxCovered=False, box_width= None, topLeft=None, topk=1, plot=True, use_gpu=False, generate_all_steps=True):
+        title = ntpath.basename(fileName)
+        
+        isFine = (layerName != 'coarse')
+        self.model.setOutputsOfInterest({
+            "fine": isFine,
+            "coarse" : not isFine
+        })
+        
+        original =  Image.open(fileName)
+>>>>>>> Loss-surface
 
         image_non_normalized = self.getTransformedImage(original, False, False)
 
         image_normalized = self.getTransformedImage(original, False, True)
         image_normalized.requires_grad = True
 
+<<<<<<< HEAD
         output = self.model(image_normalized.cuda())
+=======
+        if torch.cuda.is_available() and use_gpu:
+            image_normalized = image_normalized.cuda()
+            
+        output = self.model(image_normalized)
+>>>>>>> Loss-surface
         bestClass = torch.max(output, 1)[1]
 
         backprop = Backprop(self.model)
@@ -348,6 +552,7 @@ class SaliencyMap:
                                          bestClass,
                                          guided=True,
                                          take_max=True, #True
+<<<<<<< HEAD
                                          use_gpu=True)
         if maxCovered:       
 
@@ -356,6 +561,11 @@ class SaliencyMap:
             saliency_map_max_y_indx = saliency_map_max_y[1]
             saliency_map_max_x_indx = saliency_map_max_x[1][0, saliency_map_max_y_indx]
 
+=======
+                                         use_gpu=use_gpu)
+        title_postfix = ""
+        if maxCovered: 
+>>>>>>> Loss-surface
             if topLeft is not None:
                 saliency_map_max_x_indx = topLeft[0]
                 saliency_map_max_y_indx = topLeft[1]
@@ -367,6 +577,7 @@ class SaliencyMap:
                     saliency_map_max_y_indx_, saliency_map_max_x_indx_ = self.getCoordinatesOfHighestPatch(saliency_map, box_width, i+1)
                     saliency_map_max_x_indx.append(saliency_map_max_x_indx_)
                     saliency_map_max_y_indx.append(saliency_map_max_y_indx_)
+<<<<<<< HEAD
 #                 saliency_map_max_x_indx, saliency_map_max_y_indx = self.getCoordinatesOfHighestPixel(saliency_map)
             
             title = title + " - Occluded - " + str(box_width)
@@ -375,6 +586,14 @@ class SaliencyMap:
                 if plot:
                     print(saliency_map_max_x_indx_, saliency_map_max_y_indx_)
 
+=======
+            
+            title_postfix = " - Occluded - " + str(box_width)
+            for i in range(topk):
+                saliency_map_max_x_indx_, saliency_map_max_y_indx_, x_width, y_width = self.getBoundingBox(saliency_map_max_x_indx[i], saliency_map_max_y_indx[i], box_width)
+                # if plot:
+                #     print(saliency_map_max_x_indx_, saliency_map_max_y_indx_)
+>>>>>>> Loss-surface
                 filler = self.getFiller(x_width, y_width, image_non_normalized)
 
                 image_non_normalized[0, :, saliency_map_max_x_indx_:saliency_map_max_x_indx_ + x_width,
@@ -382,6 +601,7 @@ class SaliencyMap:
 
                 image_normalized[0, :, saliency_map_max_x_indx_:saliency_map_max_x_indx_ + x_width,
                                         saliency_map_max_y_indx_:saliency_map_max_y_indx_+y_width] = filler
+<<<<<<< HEAD
 
                 title_ = title + " - " + str(i+1) 
 
@@ -390,4 +610,19 @@ class SaliencyMap:
         else:
             heatmap = visualizeAllClasses(backprop, image_normalized, image_non_normalized, [bestClass], guided=True, use_gpu=True)        
             A = self.display_map_and_predictions(heatmap[0], title, image_normalized, layerName, plot=plot)
+=======
+                if generate_all_steps or (i == topk-1):
+                    title_postfix = title_postfix + " - " + str(i+1) 
+
+                    heatmap = visualizeAllClasses(backprop, image_normalized, [bestClass], guided=True, use_gpu=use_gpu)        
+                    A = self.display_map_and_predictions(heatmap, image_non_normalized, title_postfix, title, image_normalized, layerName, plot=plot, use_gpu=use_gpu)
+        else:
+            heatmap = visualizeAllClasses(backprop, image_normalized, [bestClass], guided=True, use_gpu=use_gpu)        
+            A = self.display_map_and_predictions(heatmap, image_non_normalized, title_postfix, title, image_normalized, layerName, plot=plot, use_gpu=use_gpu)
+        
+        # We need this to clear the hooks. del backprop is not working for some reason.
+        backprop.__del__() 
+        backprop = None
+
+>>>>>>> Loss-surface
         return saliency_map, A

@@ -4,6 +4,7 @@ import os
 import itertools
 import hashlib
 import copy
+<<<<<<< HEAD
     
 def getDatasetParams(params):
     return {
@@ -13,6 +14,20 @@ def getDatasetParams(params):
         "suffix": params['suffix'],
         "augmented": params['augmented'],
     }
+=======
+import pandas as pd
+import pickle
+import math
+    
+#TODO: All experiments wit datasplit params having augmented should have it removed.
+# This is because being augmented should have same split if it is not augmented.
+def getDatasetParams(params):
+    result = {
+        "image_path": params["image_path"],
+        "suffix": params['suffix'],
+    }
+    return result
+>>>>>>> Loss-surface
     
 def getDatasetName(params):
     datasetName = str(getDatasetParams(params))
@@ -29,12 +44,46 @@ def getModelName(params, trial_id=None):
     
     return os.path.join('models',modelName)
 
+<<<<<<< HEAD
 configJsonFileName = "params.json"
+=======
+experimetnsFileName = "experiments.csv"
+paramsFileName="params.json"
+
+def getExperimentParamsAndRecord(experimentsPath, experimentName, trial_hash) :
+    experimentsFileNameAndPath = os.path.join(experimentsPath, experimetnsFileName)
+    if os.path.exists(experimentsFileNameAndPath):
+        experiments_df = pd.read_csv(experimentsFileNameAndPath)
+        experimentRecord = experiments_df[experiments_df["trialHash"] == trial_hash]
+        experimentRecord = experimentRecord[experimentRecord["experimentName"] == experimentName]
+        # experiment_params = experimentRecord.to_dict('records')[0]
+
+        modelName = experimentRecord.iloc[0]["modelName"]
+        experimentNameAndPath = os.path.join(experimentsPath, experimentName)
+        modelNameAndPath = os.path.join(experimentNameAndPath, modelName)
+        fullFileName = os.path.join(modelNameAndPath, paramsFileName)
+        with open(fullFileName, 'rb') as f:
+            experiment_params = json.loads(f.read())
+        return experiment_params, experimentRecord
+    else:
+        raise Exception("Experiment not " + trial_hash + " found!")
+
+
+
+
+
+configJsonFileName = "params.json"
+configPickleFileName = "params.pkl"
+>>>>>>> Loss-surface
 
 class ConfigParser:
     def __init__(self, experimentsPath, dataPath, experimentName):
         self.experimentName = experimentName
         self.experimentsPath = experimentsPath
+<<<<<<< HEAD
+=======
+        self.experimentNameAndPath = os.path.join(self.experimentsPath, self.experimentName)
+>>>>>>> Loss-surface
         self.dataPath = dataPath
         self.base_params = None
             
@@ -42,6 +91,7 @@ class ConfigParser:
         self.base_params = base_params
         fileName = configJsonFileName if experiment_type != "Random" else configPickleFileName
         
+<<<<<<< HEAD
         fullFileName = os.path.join(self.experimentsPath, self.experimentName, fileName)
         if os.path.exists(self.experimentName) and os.path.exists(fullFileName):
             self.experimentName = self.experimentName+"-"+hex(int(time.time()))   
@@ -49,6 +99,16 @@ class ConfigParser:
         
         if not os.path.exists(self.experimentName):
             os.makedirs(self.experimentName)
+=======
+        fullFileName = os.path.join(self.experimentNameAndPath, fileName)
+        if os.path.exists(self.experimentName) and os.path.exists(fullFileName):
+            self.experimentName = self.experimentName+"-"+hex(int(time.time()))  
+            self.experimentNameAndPath = os.path.join(self.experimentsPath, self.experimentName)
+        fullFileName = os.path.join(self.experimentNameAndPath, fileName)
+        
+        if not os.path.exists(self.experimentNameAndPath):
+            os.makedirs(self.experimentNameAndPath)
+>>>>>>> Loss-surface
 
 
         experimentList = []
@@ -88,11 +148,19 @@ class ConfigParser:
         return fullFileName
 
     
+<<<<<<< HEAD
     def getExperiments(self):
         fullFileName = os.path.join(self.experimentsPath, self.experimentName, configJsonFileName)
         if os.path.exists(fullFileName):
             with open(fullFileName, 'rb') as f:
                 experimentList = list(map(lambda x: self.fixExperimentParams(x), json.loads(f.read())["experimentList"]))
+=======
+    def getExperiments(self, fixExperiments=True):
+        fullFileName = os.path.join(self.experimentNameAndPath, configJsonFileName)
+        if os.path.exists(fullFileName):
+            with open(fullFileName, 'rb') as f:
+                experimentList = list(map(lambda x: self.fixExperimentParams(x) if fixExperiments else x , json.loads(f.read())["experimentList"]))
+>>>>>>> Loss-surface
 
             return iter(experimentList)
         else:
@@ -100,7 +168,11 @@ class ConfigParser:
     
     # For hyper param search, fixExperimentParams needs to be called outside. TODO: fix that requirement
     def getHyperoptSearchObject(self):
+<<<<<<< HEAD
         fullFileName = os.path.join(self.experimentsPath, self.experimentName, configPickleFileName)
+=======
+        fullFileName = os.path.join(self.experimentNameAndPath, configPickleFileName)
+>>>>>>> Loss-surface
         if os.path.exists(fullFileName):   
             with open(fullFileName, 'rb') as f:
                 hyperp_search_params = pickle.load(f)
@@ -119,6 +191,7 @@ class ConfigParser:
     def fixExperimentParams(self, params_):
         params= copy.copy(params_)
 
+<<<<<<< HEAD
         params["training_count"] = params["training_count"] if ("training_count" in params) is not None else 0.64
         params["validation_count"] = params["validation_count"] if ("validation_count" in params) is not None else 0.16
         params["batchSize"] = params["batchSize"] if ("batchSize" in params) else 32
@@ -136,3 +209,24 @@ class ConfigParser:
         params["augmented"] = params["augmented"] if ("augmented" in params) else False
         
         return params
+=======
+        params["batchSize"] = params["batchSize"] if check_valid(params,"batchSize") else 32
+        params["learning_rate"] = params["learning_rate"] if check_valid(params,"learning_rate") else 0.0005
+        params["numOfTrials"] = params["numOfTrials"] if check_valid(params,"numOfTrials") else 1
+        params["fc_layers"] = params["fc_layers"] if check_valid(params,"fc_layers") else 1
+        params["modelType"] = params["modelType"] if check_valid(params,"modelType") else "BB"
+        params["lambda"] = params["lambda"] if check_valid(params,"lambda") else 1
+        params["tl_model"] = params["tl_model"] if check_valid(params,"tl_model") else "ResNet18"
+        params["augmented"] = params["augmented"] if check_valid(params,"augmented") else False
+        params["img_res"] = params["img_res"] if check_valid(params,"img_res") else 224
+        params["link_layer"] = params["link_layer"] if check_valid(params,"link_layer") else "layer1"
+        params["adaptive_smoothing"] = params["adaptive_smoothing"] if check_valid(params,"adaptive_smoothing") else False
+        params["adaptive_lambda"] = params["adaptive_lambda"] if check_valid(params,"adaptive_lambda") else 0.1
+        params["adaptive_alpha"] = params["adaptive_alpha"] if check_valid(params,"adaptive_alpha") else 0.9
+        params["noSpeciesBackprop"] = params["noSpeciesBackprop"] if check_valid(params,"noSpeciesBackprop") else False
+        
+        return params
+
+def check_valid(params, key):
+     return (key in params) and (isinstance(params[key], str)or not math.isnan(params[key]))
+>>>>>>> Loss-surface
