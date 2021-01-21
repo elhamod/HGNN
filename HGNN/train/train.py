@@ -6,13 +6,6 @@ from sklearn.metrics import f1_score
 import pandas as pd
 from tqdm import tqdm
 from tqdm.auto import trange
-<<<<<<< HEAD
-
-import warnings
-warnings.filterwarnings("ignore")
-
-from myhelpers import config_plots, TrialStatistics
-=======
 import wandb
 
 import warnings
@@ -25,22 +18,11 @@ except:
 
 from myhelpers import config_plots, TrialStatistics
 from myhelpers.try_warning import try_running
->>>>>>> Loss-surface
 from HGNN.train import CNN, dataLoader
 from HGNN.train.configParser import ConfigParser, getModelName, getDatasetName
 config_plots.global_settings()
 
 experimetnsFileName = "experiments.csv"
-<<<<<<< HEAD
-
-    
-def main(cuda, experimentsPath, dataPath, experimentName):
-    experimentPathAndName = os.path.join(experimentsPath, experimentName)
-    # set cuda
-    if torch.cuda.is_available():
-        print("using cuda", cuda)
-        torch.cuda.set_device(cuda)
-=======
 WANDB_message="wandb not working"
 
 def main(experimentsPath, dataPath, experimentName, device=None, detailed_reporting=None):
@@ -52,7 +34,7 @@ def main(experimentsPath, dataPath, experimentName, device=None, detailed_report
     if device is not None:
         print("using cuda", device)
         torch.cuda.set_device(device)
->>>>>>> Loss-surface
+
     else:
         print("using cpu")
 
@@ -61,19 +43,9 @@ def main(experimentsPath, dataPath, experimentName, device=None, detailed_report
 
     # init experiments file
     experimentsFileNameAndPath = os.path.join(experimentsPath, experimetnsFileName)
-<<<<<<< HEAD
-    if os.path.exists(experimentsFileNameAndPath):
-        experiments_df = pd.read_csv(experimentsFileNameAndPath)
-    else:
-        experiments_df = pd.DataFrame()
-    
-    # load data
-    datasetManager = dataLoader.datasetManager(experimentPathAndName)
-=======
     
     # load data
     datasetManager = dataLoader.datasetManager(experimentPathAndName, dataPath)
->>>>>>> Loss-surface
     
     paramsIterator = config_parser.getExperiments()  
     number_of_experiments = sum(1 for e in paramsIterator)  
@@ -83,22 +55,6 @@ def main(experimentsPath, dataPath, experimentName, device=None, detailed_report
     # with progressbar.ProgressBar(max_value=number_of_experiments) as bar:
     with tqdm(total=number_of_experiments, desc="experiment") as bar:
         for experiment_params in config_parser.getExperiments():
-<<<<<<< HEAD
-            bar.set_postfix(experiment_params, model_type=experiment_params["modelType"])
-            bar.update()
-
-            # load images
-            datasetManager.updateParams(config_parser.fixPaths(experiment_params))
-            dataset = datasetManager.getDataset()
-            train_loader, validation_loader, test_loader = datasetManager.getLoaders()
-            fineList = dataset.csv_processor.getFineList()
-            coarseList = dataset.csv_processor.getCoarseList()
-            numberOffine = len(fineList)
-            numberOfcoarse = len(coarseList)
-            architecture = {
-                "fine": numberOffine,
-                "coarse" : numberOfcoarse
-=======
             print(experiment_params)
             experimentHash =TrialStatistics.getTrialName(experiment_params)
 
@@ -108,35 +64,12 @@ def main(experimentsPath, dataPath, experimentName, device=None, detailed_report
             architecture = {
                 "fine": len(train_loader.dataset.csv_processor.getFineList()),
                 "coarse" : len(train_loader.dataset.csv_processor.getCoarseList())
->>>>>>> Loss-surface
             }
 
             # Loop through n trials
             for i in trange(experiment_params["numOfTrials"], desc="trial"):
                 modelName = getModelName(experiment_params, i)
                 trialName = os.path.join(experimentPathAndName, modelName)
-<<<<<<< HEAD
-
-                # Train/Load model
-                model = CNN.create_model(architecture, experiment_params)
-                if os.path.exists(CNN.getModelFile(trialName)):
-                    print("Model {0} found!".format(trialName))
-                else:
-                    CNN.trainModel(train_loader, validation_loader, experiment_params, model, trialName, test_loader)
-
-                # Add to experiments file
-                record_exists = (experiments_df['modelName'] == modelName).any() if not experiments_df.empty else False
-                if record_exists:
-                    experiments_df.drop(experiments_df[experiments_df['modelName'] == modelName].index, inplace = True) 
-                row_information = {
-                    'experimentName': experimentName,
-                    'modelName': modelName,
-                    'datasetName': getDatasetName(experiment_params),
-                    'experimentHash': TrialStatistics.getTrialName(experiment_params),
-                    'trialHash': TrialStatistics.getTrialName(experiment_params, i)
-                }
-                row_information = {**row_information, **experiment_params} 
-=======
                 trialHash = TrialStatistics.getTrialName(experiment_params, i)
 
                 row_information = {
@@ -171,28 +104,20 @@ def main(experimentsPath, dataPath, experimentName, device=None, detailed_report
                 if record_exists:
                     experiments_df.drop(experiments_df[experiments_df['modelName'] == modelName][experiments_df['experimentName'] == experimentName].index, inplace = True) 
 
->>>>>>> Loss-surface
                 experiments_df = experiments_df.append(pd.DataFrame(row_information, index=[0]), ignore_index = True)
                 experiments_df.to_csv(experimentsFileNameAndPath, header=True, index=False)
 
-
-<<<<<<< HEAD
-=======
                 try_running(lambda : run.finish(), WANDB_message)
 
             bar.update()
             
->>>>>>> Loss-surface
             experiment_index = experiment_index + 1
         
             
 
 if __name__ == "__main__":
-<<<<<<< HEAD
-=======
     torch.multiprocessing.set_start_method('spawn')
     
->>>>>>> Loss-surface
     import argparse
 
     parser = argparse.ArgumentParser()
@@ -200,11 +125,6 @@ if __name__ == "__main__":
     parser.add_argument('--experiments', required=True)
     parser.add_argument('--data', required=True)
     parser.add_argument('--name', required=True)
-<<<<<<< HEAD
-    args = parser.parse_args()
-    main(cuda=args.cuda, experimentName=args.name, experimentsPath=args.experiments, dataPath=args.data)
-=======
     parser.add_argument('--detailed', required=False, action='store_true')
     args = parser.parse_args()
     main(experimentName=args.name, experimentsPath=args.experiments, dataPath=args.data, device=args.cuda, detailed_reporting=args.detailed)
->>>>>>> Loss-surface

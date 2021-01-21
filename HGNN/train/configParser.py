@@ -4,17 +4,6 @@ import os
 import itertools
 import hashlib
 import copy
-<<<<<<< HEAD
-    
-def getDatasetParams(params):
-    return {
-        "training_count": params["training_count"],
-        "validation_count": params["validation_count"],
-        "image_path": params["image_path"],
-        "suffix": params['suffix'],
-        "augmented": params['augmented'],
-    }
-=======
 import pandas as pd
 import pickle
 import math
@@ -27,7 +16,6 @@ def getDatasetParams(params):
         "suffix": params['suffix'],
     }
     return result
->>>>>>> Loss-surface
     
 def getDatasetName(params):
     datasetName = str(getDatasetParams(params))
@@ -44,9 +32,6 @@ def getModelName(params, trial_id=None):
     
     return os.path.join('models',modelName)
 
-<<<<<<< HEAD
-configJsonFileName = "params.json"
-=======
 experimetnsFileName = "experiments.csv"
 paramsFileName="params.json"
 
@@ -74,16 +59,12 @@ def getExperimentParamsAndRecord(experimentsPath, experimentName, trial_hash) :
 
 configJsonFileName = "params.json"
 configPickleFileName = "params.pkl"
->>>>>>> Loss-surface
 
 class ConfigParser:
     def __init__(self, experimentsPath, dataPath, experimentName):
         self.experimentName = experimentName
         self.experimentsPath = experimentsPath
-<<<<<<< HEAD
-=======
         self.experimentNameAndPath = os.path.join(self.experimentsPath, self.experimentName)
->>>>>>> Loss-surface
         self.dataPath = dataPath
         self.base_params = None
             
@@ -91,15 +72,6 @@ class ConfigParser:
         self.base_params = base_params
         fileName = configJsonFileName if experiment_type != "Random" else configPickleFileName
         
-<<<<<<< HEAD
-        fullFileName = os.path.join(self.experimentsPath, self.experimentName, fileName)
-        if os.path.exists(self.experimentName) and os.path.exists(fullFileName):
-            self.experimentName = self.experimentName+"-"+hex(int(time.time()))   
-        fullFileName = os.path.join(self.experimentName, fileName)
-        
-        if not os.path.exists(self.experimentName):
-            os.makedirs(self.experimentName)
-=======
         fullFileName = os.path.join(self.experimentNameAndPath, fileName)
         if os.path.exists(self.experimentName) and os.path.exists(fullFileName):
             self.experimentName = self.experimentName+"-"+hex(int(time.time()))  
@@ -108,7 +80,6 @@ class ConfigParser:
         
         if not os.path.exists(self.experimentNameAndPath):
             os.makedirs(self.experimentNameAndPath)
->>>>>>> Loss-surface
 
 
         experimentList = []
@@ -147,20 +118,11 @@ class ConfigParser:
         
         return fullFileName
 
-    
-<<<<<<< HEAD
-    def getExperiments(self):
-        fullFileName = os.path.join(self.experimentsPath, self.experimentName, configJsonFileName)
-        if os.path.exists(fullFileName):
-            with open(fullFileName, 'rb') as f:
-                experimentList = list(map(lambda x: self.fixExperimentParams(x), json.loads(f.read())["experimentList"]))
-=======
     def getExperiments(self, fixExperiments=True):
         fullFileName = os.path.join(self.experimentNameAndPath, configJsonFileName)
         if os.path.exists(fullFileName):
             with open(fullFileName, 'rb') as f:
                 experimentList = list(map(lambda x: self.fixExperimentParams(x) if fixExperiments else x , json.loads(f.read())["experimentList"]))
->>>>>>> Loss-surface
 
             return iter(experimentList)
         else:
@@ -168,11 +130,7 @@ class ConfigParser:
     
     # For hyper param search, fixExperimentParams needs to be called outside. TODO: fix that requirement
     def getHyperoptSearchObject(self):
-<<<<<<< HEAD
-        fullFileName = os.path.join(self.experimentsPath, self.experimentName, configPickleFileName)
-=======
         fullFileName = os.path.join(self.experimentNameAndPath, configPickleFileName)
->>>>>>> Loss-surface
         if os.path.exists(fullFileName):   
             with open(fullFileName, 'rb') as f:
                 hyperp_search_params = pickle.load(f)
@@ -191,25 +149,6 @@ class ConfigParser:
     def fixExperimentParams(self, params_):
         params= copy.copy(params_)
 
-<<<<<<< HEAD
-        params["training_count"] = params["training_count"] if ("training_count" in params) is not None else 0.64
-        params["validation_count"] = params["validation_count"] if ("validation_count" in params) is not None else 0.16
-        params["batchSize"] = params["batchSize"] if ("batchSize" in params) else 32
-        params["n_epochs"] = params["n_epochs"] if ("n_epochs" in params) else 10000
-        params["patience"] = params["patience"] if ("patience" in params) else 100
-        params["learning_rate"] = params["learning_rate"] if ("learning_rate" in params) else 0.0005
-        params["fc_width"] = params["fc_width"] if ("fc_width" in params) else 200
-        params["fc_layers"] = params["fc_layers"] if ("fc_layers" in params) else 1
-        params["modelType"] = params["modelType"] if ("modelType" in params) else "blackbox"
-        params["unsupervisedOnTest"] = params["unsupervisedOnTest"] if ("unsupervisedOnTest" in params) else False
-        params["lambda"] = params["lambda"] if ("lambda" in params) else 1
-        params["tl_model"] = params["tl_model"] if ("tl_model" in params) else "ResNet18"
-        params["numOfTrials"] = params["numOfTrials"] if ("numOfTrials" in params) else 1
-        params["tl_model"] = params["tl_model"] if ("tl_model" in params) else "ResNet18"
-        params["augmented"] = params["augmented"] if ("augmented" in params) else False
-        
-        return params
-=======
         params["batchSize"] = params["batchSize"] if check_valid(params,"batchSize") else 32
         params["learning_rate"] = params["learning_rate"] if check_valid(params,"learning_rate") else 0.0005
         params["numOfTrials"] = params["numOfTrials"] if check_valid(params,"numOfTrials") else 1
@@ -229,4 +168,3 @@ class ConfigParser:
 
 def check_valid(params, key):
      return (key in params) and (isinstance(params[key], str)or not math.isnan(params[key]))
->>>>>>> Loss-surface

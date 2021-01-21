@@ -5,26 +5,6 @@ import torch
 import numpy as np
 
 class model_activations(torch.nn.Module):
-<<<<<<< HEAD
-    def __init__(self, model, layer_name, useHeirarchy):
-        super(model_activations, self).__init__()
-        
-        if not useHeirarchy:
-            self.features = model
-        else:
-            activations = model.activations
-            self.features = (lambda x: activations(x)[layer_name])
-        
-    def forward(self, x):
-        x = self.features(x)
-        return x
-    
-# Define the function for plotting the activations
-def plot_activations(model, layer_name, input_img, experimentName, params, title="", n_splits=1):
-    activation = model_activations(model, layer_name, params["useHeirarchy"])
-    A = activation(input_img)
-    if (layer_name == "species" or layer_name == "genus"):
-=======
     def __init__(self, model, layer_name, dataset):
         super(model_activations, self).__init__()
 
@@ -51,24 +31,16 @@ def plot_activations(model, layer_name, input_img, experimentName, params, datas
     activation = model_activations(model, layer_name, dataset)
     A = activation(input_img)
     if (layer_name == "coarse" or layer_name == "fine"):
->>>>>>> Loss-surface
         A = torch.nn.Softmax(dim=1)(A)
     print("Number of activations: ", A.shape)
     
     A = A.squeeze(0).detach().cpu().numpy()
-<<<<<<< HEAD
-    n_activations = A.shape[0]
-    A_min = A.min().item()
-    A_max = A.max().item()
-=======
     A_min = A.min().item()
     A_max = A.max().item()
 
     if topA is not None:
         A_topIndices = sorted(range(len(A)), key=lambda i: A[i], reverse=True)[:topA]
         A = A[A_topIndices]
-
->>>>>>> Loss-surface
     
     A_split = np.array_split(A, n_splits)
 
@@ -79,8 +51,6 @@ def plot_activations(model, layer_name, input_img, experimentName, params, datas
         ax = axes[j] if n_splits >1 else axes
         A_single = np.expand_dims(A_single, axis=0)
         feature_num = A_single.shape[1]
-<<<<<<< HEAD
-=======
         
         # Set ticks
         if (layer_name == "coarse" or layer_name == "fine"):
@@ -93,7 +63,6 @@ def plot_activations(model, layer_name, input_img, experimentName, params, datas
             ax.set_xticks(tick_marks)
             ax.set_xticklabels([target_names[i] for i in A_topIndices], rotation=45, ha='right')
         
->>>>>>> Loss-surface
         ax.imshow(A_single, vmin=A_min, vmax=A_max, cmap='Blues', extent=[idx-0.5, idx+feature_num-0.5, -0.5, 0.5])
         for i in range(feature_num):
             ax.text(i+idx, 0, "{:0.2f}".format(A_single[0, i]),
@@ -104,21 +73,11 @@ def plot_activations(model, layer_name, input_img, experimentName, params, datas
 
    
     ax = plt.gca()
-<<<<<<< HEAD
-    ax.axes.xaxis.set_visible(False)
-    ax.axes.yaxis.set_visible(False)
-    
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.savefig(os.path.join(experimentName, title+"_activations.pdf"), bbox_inches = 'tight',
-    pad_inches = 0)
-    plt.suptitle("Activations - "+title, fontsize=10)
-=======
     ax.axes.yaxis.set_visible(False)
     
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.savefig(os.path.join(experimentName, fileName+"_activations.pdf"), bbox_inches = 'tight',
     pad_inches = 0)
     # plt.suptitle("Activations - "+title, fontsize=10)
->>>>>>> Loss-surface
     plt.show()
     return A
