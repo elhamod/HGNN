@@ -3,10 +3,7 @@ import torch
 import pandas as pd
 from PIL import Image
 from tqdm import tqdm
-<<<<<<< HEAD
-=======
 import time
->>>>>>> Loss-surface
 
 # metadata file provided by dataset.
 fine_csv_fileName = "metadata.csv"
@@ -31,48 +28,12 @@ fine_csv_usedColumns = [fine_csv_fileName_header,
 image_subpath = "images"
 
 # Loads, processes, cleans up and analyise fish metadata
-class CSV_processor:
-<<<<<<< HEAD
-    def __init__(self, data_root, suffix, verbose=False):
-=======
+class CSV_processor
     def __init__(self, data_root, suffix, cleanup=False, verbose=False):
->>>>>>> Loss-surface
         self.data_root = data_root
         self.suffix = suffix
         self.image_subpath = image_subpath
         self.fine_csv = None
-<<<<<<< HEAD
-        self.samples = []
-        self.filesPerFine_table = None
-        self.filesPerFamilyAndGenis_table = None
-        
-        self.get_csv_file()
-        self.cleanup_csv_file()
-        self.save_csv_file()
-    
-    # Creates tables of files per fine/coarse/family
-    def get_statistics(self, saveToDisk=False):
-        self.filesPerFine_table = self.fine_csv[fine_csv_scientificName_header].reset_index().groupby(fine_csv_scientificName_header).agg('count').sort_values(by=[fine_csv_fileName_header]).rename(columns={fine_csv_fileName_header: "count"})
-        
-        self.filesPerFamilyAndGenis_table = self.fine_csv[[fine_csv_Family_header, fine_csv_Coarse_header]].reset_index().groupby([fine_csv_Family_header, fine_csv_Coarse_header]).agg('count').sort_values(by=[fine_csv_Family_header, fine_csv_Coarse_header]).rename(columns={fine_csv_fileName_header: "count"})
-        
-        if saveToDisk:
-            self.filesPerFine_table.to_csv(os.path.join(self.data_root, self.suffix, statistic_countPerFine))
-            self.filesPerFamilyAndGenis_table.to_csv(os.path.join(self.data_root, self.suffix, statistic_countPerFamilyAndGenis))
-    
-    # The list of fine/coarse names
-    def getFineList(self):
-         return self.fine_csv[fine_csv_scientificName_header].unique().tolist()    
-    def getCoarseList(self): 
-        return self.fine_csv[fine_csv_Coarse_header].unique().tolist()   
-    def getFineIndices(self, fine):
-        result = self.fine_csv[fine_csv_scientificName_header].reset_index()
-        return result[result[fine_csv_scientificName_header]==fine].index.tolist() 
-    def getNumberOfImagesForFine(self, fine):
-        countByFine_table = self.fine_csv[fine_csv_scientificName_header].reset_index().groupby(fine_csv_scientificName_header).count()
-        selectedCount = countByFine_table.loc[fine]
-        return selectedCount[0].item()
-=======
 
         self.get_csv_file()
         if cleanup:
@@ -89,7 +50,6 @@ class CSV_processor:
          return sorted(self.fine_csv[fine_csv_scientificName_header].unique().tolist())    
     def getCoarseList(self): 
         return sorted(self.fine_csv[fine_csv_Coarse_header].unique().tolist())   
->>>>>>> Loss-surface
     
     # Fine/Coarse conversions
     def getFineWithinCoarse(self, coarse):
@@ -109,13 +69,8 @@ class CSV_processor:
         cleaned_fine_csv_fileName_full_path = os.path.join(self.data_root, self.suffix, cleaned_fine_csv_fileName)
         # clean up the csv file from unfound images
         if not os.path.exists(cleaned_fine_csv_fileName_full_path):
-<<<<<<< HEAD
-            self.fine_csv.to_csv(cleaned_fine_csv_fileName_full_path, sep='\t')       
-        
-=======
             self.fine_csv.to_csv(cleaned_fine_csv_fileName_full_path, sep='\t')
 
->>>>>>> Loss-surface
     
     # Loads metadata with some cleaning
     def get_csv_file(self):
@@ -127,24 +82,16 @@ class CSV_processor:
             self.fine_csv = pd.read_csv(csv_full_path, delimiter='\t', index_col=fine_csv_fileName_header, usecols=fine_csv_usedColumns)
             self.fine_csv = self.fine_csv.loc[~self.fine_csv.index.duplicated(keep='first')]                         
             self.fine_csv = self.fine_csv[self.fine_csv[fine_csv_Coarse_header] != '#VALUE!']
-<<<<<<< HEAD
-=======
             mask = self.fine_csv.index.map(lambda x: isinstance(x, str))
             self.fine_csv = self.fine_csv[mask]
             # strip trailing white spaces
             self.fine_csv = self.fine_csv.applymap(lambda x: x.strip().capitalize())
->>>>>>> Loss-surface
 
         else:
             self.fine_csv = pd.read_csv(cleaned_fine_csv_fileName_full_path, delimiter='\t', index_col=fine_csv_fileName_header, usecols=fine_csv_usedColumns) 
 
         # and sort
-<<<<<<< HEAD
-        self.fine_csv = self.fine_csv.sort_values(by=[fine_csv_Family_header, fine_csv_Coarse_header])
-
-=======
         self.fine_csv = self.fine_csv.sort_values(by=[fine_csv_scientificName_header])
->>>>>>> Loss-surface
     
     def get_image_full_path(self):
         return os.path.join(self.data_root, self.image_subpath)
@@ -154,50 +101,6 @@ class CSV_processor:
         img_full_path = self.get_image_full_path()
 
         #get intersection between csv file and list of images
-<<<<<<< HEAD
-        fileNames1 = os.listdir(img_full_path)
-        fileNames2 = self.fine_csv.index.values.tolist()
-        fileNames = [value for value in fileNames1 if value in fileNames2]
-        FoundFileNames = []
-        with tqdm(total=len(fileNames), desc="Loading images") as bar:
-            for fileName in fileNames:
-                bar.set_postfix(fileName=fileName) 
-                try:
-                    # Find match in csv file
-                    matchRow = self.fine_csv.loc[fileName]
-                    matchFine = matchRow[fine_csv_scientificName_header]
-    #                 matchFamily = matchRow[fine_csv_Family_header]
-                    matchCoarse = matchRow[fine_csv_Coarse_header]
-
-                    # Go through original and augmented image   
-                    images = []
-                    prefix, ext = os.path.splitext(fileName)
-                    original = Image.open(os.path.join(img_full_path, fileName))
-                    original.load()
-                    images.append(original)
-                    for file in glob.glob(os.path.join(img_full_path, prefix+"_aug*"+ext)):
-                        bar.set_postfix(fileName=file) 
-                        augmented = Image.open(os.path.join(img_full_path, file))
-                        images.append(augmented)  # Converting to np is making this loading slow! For future, always use Image.open alone and only convert to np when needed (e.g. matlab display)
-                        augmented.load()
-
-                    sampleInfo = {
-                        'fine': matchFine,
-    #                     'family': matchFamily,
-                        'coarse': matchCoarse,
-                        'fileName': fileName,
-                        'images':  images
-                    }
-                    self.samples.append(sampleInfo)
-
-                    FoundFileNames.append(fileName)
-                except Exception as inst:
-                    print("Unexpected error:", inst)
-                    pass
-                bar.update()
-        
-        self.fine_csv = self.fine_csv.loc[FoundFileNames]
-=======
         fileNames_dir = os.listdir(img_full_path)
 
         self.fine_csv.index = self.fine_csv.index.map(lambda x: get_equivalent(x, fileNames_dir))
@@ -241,4 +144,3 @@ def get_equivalent(csv_value, dir_lst):
 
 
 
->>>>>>> Loss-surface
