@@ -4,17 +4,22 @@ import pandas as pd
 from PIL import Image
 from tqdm import tqdm
 import time
+from .taxonomy import Taxonomy
+
+
 
 # metadata file provided by dataset.
 fine_csv_fileName = "metadata.csv"
 # cleaned up metadata file that has no duplicates, invalids...etc
 cleaned_fine_csv_fileName = "cleaned_metadata.csv"
+cleaned_fine_tree_fileName = "cleaned_metadata.tre"
 
 # Saved file names.
 statistic_countPerFine="count_per_fine.csv"
 statistic_countPerFamilyAndGenis="count_per_family_genus.csv"
 
 # metadata table headers.
+fine_csv_ott_header = 'ott_id'
 fine_csv_fileName_header = "fileName"
 fine_csv_scientificName_header = "scientificName"
 fine_csv_Coarse_header = "Genus"
@@ -28,16 +33,27 @@ fine_csv_usedColumns = [fine_csv_fileName_header,
 image_subpath = "images"
 
 # Loads, processes, cleans up and analyise fish metadata
-class CSV_processor
+class CSV_processor:
     def __init__(self, data_root, suffix, cleanup=False, verbose=False):
         self.data_root = data_root
         self.suffix = suffix
         self.image_subpath = image_subpath
         self.fine_csv = None
 
+        # taxa related
+        self.tax = None
+        self.distance_matrix = None
+
         self.get_csv_file()
         if cleanup:
             self.cleanup_csv_file()
+
+        # Building the taxonomy and fixing csv if needed.
+        self.build_taxonomy()
+        if cleanup or (fine_csv_ott_header not in self.fine_csv):
+            # add ott_ids if they don't exist
+            self.fine_csv[fine_csv_ott_header] = self.fine_csv.apply(lambda row: self.tax.ott_id_dict[row[fine_csv_scientificName_header]], axis=1)
+
         self.save_csv_file()
 
     def getCoarseLabel(self, fileName):
@@ -106,8 +122,30 @@ class CSV_processor
         self.fine_csv.index = self.fine_csv.index.map(lambda x: get_equivalent(x, fileNames_dir))
         mask = self.fine_csv.index.map(lambda x: x is not None)
         self.fine_csv = self.fine_csv[mask]
+
         print(self.fine_csv)
         # self.fine_csv = self.fine_csv[self.fine_csv.index.isin(fileNames)]
+
+    def build_taxonomy(self):
+        df_nodupes = self.fine_csv[fine_csv_scientificName_header].drop_duplicates() # Will probably need more processing to deal with small letter...etc
+        node_ids = df_nodupes.tolist()
+
+        cleaned_fine_tree_fileName_full_path = os.path.join(self.data_root, self.suffix, cleaned_fine_tree_fileName)
+        self.tax = Taxonomy(node_ids, cleaned_fine_tree_fileName_full_path, verbose=False)
+
+        # build distance matrix for efficiency
+        fineList = self.getFineList()
+
+        self.distance_matrix = torch.zeros(len(fineList), len(fineList))
+        for i, species_i in enumerate(fineList):
+            for j, species_j in enumerate(fineList):
+                self.distance_matrix[i, j] = self.tax.get_distance(species_i, species_j)
+
+
+
+
+
+
 
 # exmaple: FFFFffFF.JPG -> FFFFffFF_
 def get_fileName_prefix(txt):

@@ -163,6 +163,8 @@ class ConfigParser:
         params["adaptive_lambda"] = params["adaptive_lambda"] if check_valid(params,"adaptive_lambda") else 0.1
         params["adaptive_alpha"] = params["adaptive_alpha"] if check_valid(params,"adaptive_alpha") else 0.9
         params["noSpeciesBackprop"] = params["noSpeciesBackprop"] if check_valid(params,"noSpeciesBackprop") else False
+        params["phylogeny_loss"] = params["phylogeny_loss"] if check_valid(params,"phylogeny_loss") else False
+        params["phylogeny_loss_epsilon"] = params["phylogeny_loss_epsilon"] if check_valid(params,"phylogeny_loss_epsilon") else 0.03
         
         return params
 

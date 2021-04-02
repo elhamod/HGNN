@@ -403,6 +403,8 @@ def get_total_adaptive_loss(adaptive_alpha, adaptive_lambda, loss_fine, loss_coa
 def f1_criterion(device):
     return lambda pred, true : torch.reciprocal(torch.tensor(get_f1(*getPredictions(pred, true), device=device), requires_grad=True))
 
+
+# ----Escort criterion
 def escort_function(x, p=2):
     x_exp = torch.abs(x)**p
     x_exp_sum = torch.sum(x_exp, 1, keepdim=True)
@@ -415,6 +417,68 @@ def escort_criterion(device):
     if device is not None:
         criterion = criterion.cuda()
     return lambda pred, true : criterion((escort_function(pred)+ 1e-7).log(), nn.functional.one_hot(true, num_classes=pred.shape[1]).float())
+#------
+
+
+# ----Phylogeny criterion
+class Phylogeny_KLDiv():
+    def __init__(self, distance_matrix):
+        self.distance_matrix = distance_matrix
+        self.cuda_=False
+
+    def __call__(self, pred, true):
+
+
+        # print(true[0], pred[0,:])
+        # sum_w = torch.sum(self.distance_matrix[true, :], 1).reshape(-1, 1)
+        # max_w = torch.max(self.distance_matrix[true, :], 1)[0].reshape(-1, 1)
+        # w = self.distance_matrix[true, :]/ sum_w
+        # w = self.distance_matrix[true, :]/ max_w
+        w = max_w - self.distance_matrix[true, :]
+        # print('w', w[0,:])
+
+        loss = torch.nn.KLDivLoss()
+        loss2 = torch.nn.LogSoftmax(dim=1)
+        loss3 = torch.nn.Softmax(dim=1)
+        temp = loss2(pred)
+        # print('1', loss3(pred)[0, :])
+        temp2 = loss3(w)
+        # print('1_', temp2[0, :])
+        temp = loss(temp, temp2)
+        # print('2', temp)
+
+        return temp
+
+    def cuda(self):
+        self.cuda_ = True
+        self.distance_matrix = self.distance_matrix.cuda()
+        return self
+#------
+
+
+
+# ----Phylogeny criterion
+class Phylogeny_MSE():
+    def __init__(self, distance_matrix, phylogeny_loss_epsilon):
+        self.criterion = nn.MSELoss()
+        self.distance_matrix = distance_matrix
+        self.epsilon = phylogeny_loss_epsilon
+
+    def __call__(self, pred, true):
+        # get d[true, :]
+        d = self.distance_matrix[true, :] + self.epsilon
+
+        # get inv
+        inv_d = 1/d
+
+        # get MSE
+        return self.criterion(inv_d, pred)   
+
+    def cuda(self):
+        self.criterion = self.criterion.cuda()
+        self.distance_matrix = self.distance_matrix.cuda()
+        return self
+#------
 
 
 def trainModel(train_loader, validation_loader, params, model, savedModelName, test_loader=None, device=None, detailed_reporting=False):  
@@ -425,6 +489,8 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     unsupervisedOnTest = params["unsupervisedOnTest"]
     lambda_coarse = params["lambda"]
     lambda_fine = 1
+    use_phylogeny_loss = params["phylogeny_loss"]
+    phylogeny_loss_epsilon = params["phylogeny_loss_epsilon"]
 
     if trainModel is None:
         print("training model on CPU!")
@@ -439,6 +505,8 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     isOldBlackbox = (modelType == "basic_blackbox")
     isBlackbox = (modelType == "BB")
     isDSN = (modelType == "DSN")
+
+    assert ((use_phylogeny_loss==False) or isBlackbox), "Coarse loss and phylogeny tree are not simultaneously supported." 
     
     df = pd.DataFrame()
     
@@ -456,9 +524,16 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
 
     print("Training started...")
     start = time.time()
-    criterion = nn.CrossEntropyLoss()
-    # criterion = f1_criterion(device)
-    # criterion = escort_criterion(device)
+
+    if not use_phylogeny_loss:
+        criterion = nn.CrossEntropyLoss()
+        # criterion = f1_criterion(device)
+        # criterion = escort_criterion(device)
+    elif use_phylogeny_loss=="MSE":
+        criterion = Phylogeny_MSE(train_loader.dataset.csv_processor.distance_matrix, phylogeny_loss_epsilon)
+    else:
+        criterion = Phylogeny_KLDiv(train_loader.dataset.csv_processor.distance_matrix)
+
     if device is not None:
         criterion = criterion.cuda()
 
@@ -574,8 +649,8 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
 
                 'training_coarse_loss': training_coarse_loss if getCoarse and detailed_reporting else None,
                 'validation_coarse_loss': validation_coarse_loss if getCoarse and detailed_reporting else None,
-                'training_coarse_f1':  training_coarse_f1 if not isDSN and detailed_reporting else None,
-                'validation_coarse_f1': validation_coarse_f1 if not isDSN and detailed_reporting else None,
+                'training_coarse_f1':  training_coarse_f1 if getCoarse and not isDSN and detailed_reporting else None,
+                'validation_coarse_f1': validation_coarse_f1 if getCoarse and not isDSN and detailed_reporting else None,
                 'test_coarse_f1': test_coarse_f1 if test_loader and not isDSN and detailed_reporting else None,
             }
             
@@ -640,7 +715,9 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
             j = json.dumps(params)
             f = open(os.path.join(savedModelName, paramsFileName),"w")        
             f.write(j)
-            f.close()  
+            f.close() 
+
+        wandb.run.summary["best_val"] = 1/early_stopping.best_score 
     
     return df, epochs, time_elapsed
 
