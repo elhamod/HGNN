@@ -225,13 +225,14 @@ class SaliencyMap:
         result = np.dot(img_numpy, [0.299, 0.587, 0.144])
         return result
     
-    def display_map_and_predictions(self, heatmap, image_non_normalized, fileName_postfix, fileName, img, layerName, plot=True, use_gpu=False):
+    def display_map_and_predictions(self, heatmap, image_non_normalized, fileName_postfix, fileName, img, patches_mask, layerName, plot=True, use_gpu=False):
         title = fileName.replace('_', '\_')
         if plot:
             fig = plt.figure(figsize=(8, 2.5), dpi= 300)
             
             plt.imshow(self.getGrayScale(format_for_plotting(image_non_normalized).cpu().detach().numpy()),cmap='gray', alpha=0.6) # [:, :, 2] to show a channel
             plt.imshow(self.getGrayScale(format_for_plotting(heatmap).cpu().detach().numpy()), cmap='seismic', alpha=0.5)
+            plt.imshow(format_for_plotting(patches_mask).cpu().detach().numpy(), cmap='seismic', alpha=0.3)
             plt.xticks([])
             plt.yticks([])
 
@@ -270,12 +271,16 @@ class SaliencyMap:
         y_indx = y_indx-box_half_width
         return x_indx, y_indx, box_width, box_width
 
-    def getFiller(self, x_width, y_width, img):
+    def getFiller(self, x_width, y_width, img, green=False):
         dim = img.shape[1]
         detached = img.detach()
         filler = torch.zeros((1, dim,x_width, y_width))
-        for i in range(dim):
-            filler[0, i, :, :] = detached[0, i, 0, 0]
+        if not green:
+            for i in range(dim):
+                filler[0, i, :, :] = detached[0, i, 0, 0]      
+        else:
+            for i in range(dim):
+                filler[0, i, :, :] = torch.ones((1, 1,x_width, y_width)) if i == 1 else torch.zeros((1, 1,x_width, y_width))
         return filler
     
     def getCoordinatedOfHighest(self, tnsor, topk=1):
@@ -312,6 +317,7 @@ class SaliencyMap:
         original =  Image.open(fileName)
 
         image_non_normalized = self.getTransformedImage(original, False, False)
+        patches_mask = torch.clone(image_non_normalized)
 
         image_normalized = self.getTransformedImage(original, False, True)
         image_normalized.requires_grad = True
@@ -347,10 +353,14 @@ class SaliencyMap:
                 saliency_map_max_x_indx_, saliency_map_max_y_indx_, x_width, y_width = self.getBoundingBox(saliency_map_max_x_indx[i], saliency_map_max_y_indx[i], box_width)
                 # if plot:
                 #     print(saliency_map_max_x_indx_, saliency_map_max_y_indx_)
-                filler = self.getFiller(x_width, y_width, image_non_normalized)
+                filler = self.getFiller(x_width, y_width, image_non_normalized, green=False)
+                green_filler = self.getFiller(x_width, y_width, image_non_normalized, green=True)
 
                 image_non_normalized[0, :, saliency_map_max_x_indx_:saliency_map_max_x_indx_ + x_width,
                                         saliency_map_max_y_indx_:saliency_map_max_y_indx_+y_width] = filler
+                
+                patches_mask[0, :, saliency_map_max_x_indx_:saliency_map_max_x_indx_ + x_width,
+                                        saliency_map_max_y_indx_:saliency_map_max_y_indx_+y_width] = green_filler
 
                 image_normalized[0, :, saliency_map_max_x_indx_:saliency_map_max_x_indx_ + x_width,
                                         saliency_map_max_y_indx_:saliency_map_max_y_indx_+y_width] = filler
@@ -358,10 +368,10 @@ class SaliencyMap:
                     title_postfix = title_postfix + " - " + str(i+1) 
 
                     heatmap = visualizeAllClasses(backprop, image_normalized, [bestClass], guided=True, use_gpu=use_gpu)        
-                    A = self.display_map_and_predictions(heatmap, image_non_normalized, title_postfix, title, image_normalized, layerName, plot=plot, use_gpu=use_gpu)
+                    A = self.display_map_and_predictions(heatmap, image_non_normalized, title_postfix, title, image_normalized, patches_mask, layerName, plot=plot, use_gpu=use_gpu)
         else:
-            heatmap = visualizeAllClasses(backprop, image_normalized, [bestClass], guided=True, use_gpu=use_gpu)        
-            A = self.display_map_and_predictions(heatmap, image_non_normalized, title_postfix, title, image_normalized, layerName, plot=plot, use_gpu=use_gpu)
+            heatmap = visualizeAllClasses(backprop, image_normalized, [bestClass], guided=True, use_gpu=use_gpu) 
+            A = self.display_map_and_predictions(heatmap, image_non_normalized, title_postfix, title, image_normalized, patches_mask, layerName, plot=plot, use_gpu=use_gpu)
         
         # We need this to clear the hooks. del backprop is not working for some reason.
         backprop.__del__() 
