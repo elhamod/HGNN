@@ -19,6 +19,7 @@ except:
 from myhelpers import config_plots, TrialStatistics
 from myhelpers.try_warning import try_running
 from HGNN.train import CNN, dataLoader
+from myhelpers import cifar_dataLoader
 from HGNN.train.configParser import ConfigParser, getModelName, getDatasetName
 config_plots.global_settings()
 
@@ -44,9 +45,6 @@ def main(experimentsPath, dataPath, experimentName, device=None, detailed_report
     # init experiments file
     experimentsFileNameAndPath = os.path.join(experimentsPath, experimetnsFileName)
     
-    # load data
-    datasetManager = dataLoader.datasetManager(experimentPathAndName, dataPath)
-    
     paramsIterator = config_parser.getExperiments()  
     number_of_experiments = sum(1 for e in paramsIterator)  
     experiment_index = 0
@@ -59,6 +57,10 @@ def main(experimentsPath, dataPath, experimentName, device=None, detailed_report
             experimentHash =TrialStatistics.getTrialName(experiment_params)
 
             # load images 
+            if experiment_params['image_path'] == 'cifar-100-python':
+                datasetManager = cifar_dataLoader.datasetManager(experimentPathAndName, dataPath)
+            else:
+                datasetManager = dataLoader.datasetManager(experimentPathAndName, dataPath)
             datasetManager.updateParams(config_parser.fixPaths(experiment_params))
             train_loader, validation_loader, test_loader = datasetManager.getLoaders()
             architecture = {
@@ -92,6 +94,10 @@ def main(experimentsPath, dataPath, experimentName, device=None, detailed_report
                 if os.path.exists(CNN.getModelFile(trialName)):
                     print("Model {0} found!".format(trialName))
                 else:
+                    initModelPath = CNN.getInitModelFile(experimentPathAndName)
+                    if os.path.exists(initModelPath):
+                        model.load_state_dict(torch.load(initModelPath))
+                        print("Init Model {0} found!".format(initModelPath))
                     CNN.trainModel(train_loader, validation_loader, experiment_params, model, trialName, test_loader, device=device, detailed_reporting=detailed_reporting)
 
                 # Add to experiments file

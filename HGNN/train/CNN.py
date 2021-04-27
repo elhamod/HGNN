@@ -12,6 +12,7 @@ from sklearn.metrics import f1_score
 import json
 from tqdm import tqdm
 import math
+from torchsummary import summary
 
 try:
     import wandb
@@ -20,11 +21,12 @@ except:
 
 from myhelpers.earlystopping import EarlyStopping
 from myhelpers.try_warning import try_running
-from .resnet_cifar import cifar_resnet56
+from myhelpers.resnet_cifar import cifar_resnet56
 from .cifar_nin import nin_cifar100
 
 
 modelFinalCheckpoint = 'finalModel.pt'
+modelStartCheckpoint = 'initModel.pt'
 
 saved_models_per_iteration_folder= "iterations"
 saved_models_per_iteration_name="iteration{0}.pt"
@@ -165,15 +167,15 @@ def getCustomTL_layer(tl_model, pretrained_model, from_layer=None, to_layer=None
         output.add_module("fc", Flatten())
         return output
     else:
-        if tl_model == "CIFAR":
-            tl_model_subLayers = [pretrained_model.conv1,
-              pretrained_model.bn1,
-              pretrained_model.relu,
-              pretrained_model.layer1,
-              pretrained_model.layer2,
-              pretrained_model.layer3,
-              pretrained_model.avgpool]
-        else:
+        # if tl_model == "CIFAR":
+        #     tl_model_subLayers = [pretrained_model.conv1,
+        #       pretrained_model.bn1,
+        #       pretrained_model.relu,
+        #       pretrained_model.layer1,
+        #       pretrained_model.layer2,
+        #       pretrained_model.layer3,
+        #       pretrained_model.avgpool]
+        # else:
             # tl_model_subLayers = [pretrained_model.conv1,
             #   pretrained_model.bn1,
             #   pretrained_model.relu,
@@ -184,28 +186,28 @@ def getCustomTL_layer(tl_model, pretrained_model, from_layer=None, to_layer=None
             #   pretrained_model.layer4,
             #   pretrained_model.avgpool]
 
-            # Get layers except for fc (last) one
-            tl_model_subLayer_names = list(dict(pretrained_model.named_children()).keys())[:-1]
+        # Get layers except for fc (last) one
+        tl_model_subLayer_names = list(dict(pretrained_model.named_children()).keys())[:-1]
 
-            # Get indices of from and to layers
-            from_layer_index = 0
-            to_layer_index = len(tl_model_subLayer_names)
-            if from_layer is not None:
-                try:
-                    from_layer_index = tl_model_subLayer_names.index(from_layer)
-                except:
-                    print(from_layer, "is not in", tl_model_subLayer_names)
-                    raise
-            if to_layer is not None:
-                try:
-                    to_layer_index = tl_model_subLayer_names.index(to_layer)
-                except:
-                    print(to_layer, "is not in", tl_model_subLayer_names)
-                    raise
+        # Get indices of from and to layers
+        from_layer_index = 0
+        to_layer_index = len(tl_model_subLayer_names)
+        if from_layer is not None:
+            try:
+                from_layer_index = tl_model_subLayer_names.index(from_layer)
+            except:
+                print(from_layer, "is not in", tl_model_subLayer_names)
+                raise
+        if to_layer is not None:
+            try:
+                to_layer_index = tl_model_subLayer_names.index(to_layer)
+            except:
+                print(to_layer, "is not in", tl_model_subLayer_names)
+                raise
 
-            children_layers = list(pretrained_model.children())
-            tl_model_subLayer_names_subset = tl_model_subLayer_names[from_layer_index:to_layer_index]
-            tl_model_subLayers = list(map(lambda x: children_layers[tl_model_subLayer_names.index(x)], tl_model_subLayer_names_subset))
+        children_layers = list(pretrained_model.children())
+        tl_model_subLayer_names_subset = tl_model_subLayer_names[from_layer_index:to_layer_index]
+        tl_model_subLayers = list(map(lambda x: children_layers[tl_model_subLayer_names.index(x)], tl_model_subLayer_names_subset))
         return tl_model_subLayers
 
 def get_layer_by_name(model, layer_name):
@@ -240,6 +242,9 @@ class CNN_Two_Nets(nn.Module):
         
         # h_y block
         self.h_y = torch.nn.Sequential(*getCustomTL_layer(tl_model, self.network_coarse, None, link_layer)) 
+
+        # print('hy')
+        # summary(self.h_y.cuda(), (3, 32, 32))
 
         # g_c block
         self.g_c = None
@@ -323,7 +328,9 @@ class CNN_Two_Nets(nn.Module):
         "coarse" : True
     }
     def activations(self, x, outputs=default_outputs):  
+        # print(x.shape)
         hy_features = self.h_y(x)
+        # print(hy_features.shape)
         
         hb_hy_features = None
         hb_features = None
@@ -345,6 +352,8 @@ class CNN_Two_Nets(nn.Module):
         else:
             hb_hy_features = hy_features
 
+        # print('hb_hy_features', hb_hy_features.shape)
+
         yc = None
         gc_features = None
         if outputs["coarse"] and self.g_c is not None:
@@ -355,7 +364,9 @@ class CNN_Two_Nets(nn.Module):
         gy_features = None
         if outputs["fine"]:
             gy_features = self.g_y(hb_hy_features)
+            # print('gy_features', gy_features.shape)
             y = self.g_y_fc(gy_features)
+            # print('y', y.shape)
             
 
         modelType_has_coarse = gc_features is not None and (self.modelType!="DSN")  
@@ -375,6 +386,9 @@ class CNN_Two_Nets(nn.Module):
 
 def getModelFile(experimentName):
     return os.path.join(experimentName, modelFinalCheckpoint)
+
+def getInitModelFile(experimentName):
+    return os.path.join(experimentName, modelStartCheckpoint)
 
 
 def get_total_adaptive_loss(adaptive_alpha, adaptive_lambda, loss_fine, loss_coarse):
@@ -427,11 +441,9 @@ class Phylogeny_KLDiv():
         self.cuda_=False
 
     def __call__(self, pred, true):
-
-
         # print(true[0], pred[0,:])
         # sum_w = torch.sum(self.distance_matrix[true, :], 1).reshape(-1, 1)
-        # max_w = torch.max(self.distance_matrix[true, :], 1)[0].reshape(-1, 1)
+        max_w = torch.max(self.distance_matrix[true, :], 1)[0].reshape(-1, 1)
         # w = self.distance_matrix[true, :]/ sum_w
         # w = self.distance_matrix[true, :]/ max_w
         w = max_w - self.distance_matrix[true, :]
@@ -444,7 +456,15 @@ class Phylogeny_KLDiv():
         # print('1', loss3(pred)[0, :])
         temp2 = loss3(w)
         # print('1_', temp2[0, :])
+
+        # Select ones that are incorrect:
+        # filter_ = (torch.max(pred, 1)[1].reshape(-1, 1) != true.reshape(-1, 1)).reshape(-1)
+        # temp = temp[filter_, :]
+        # temp2 = temp2[filter_, :]
+
         temp = loss(temp, temp2)
+
+        # print('--')
         # print('2', temp)
 
         return temp
@@ -717,7 +737,13 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
             f.write(j)
             f.close() 
 
-        wandb.run.summary["best_val"] = 1/early_stopping.best_score 
+
+        wandb.run.summary["validation_fine_f1"] = -1/early_stopping.best_score 
+
+        predlist_test, lbllist_test = getLoaderPredictionProbabilities(test_loader, model, params, device=device)
+        predlist_test, lbllist_test = getPredictions(predlist_test, lbllist_test)
+        test_fine_f1 = get_f1(predlist_test, lbllist_test, device=device)
+        wandb.run.summary["test_fine_f1"] = test_fine_f1
     
     return df, epochs, time_elapsed
 
