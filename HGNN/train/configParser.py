@@ -165,7 +165,11 @@ class ConfigParser:
         params["noSpeciesBackprop"] = params["noSpeciesBackprop"] if check_valid(params,"noSpeciesBackprop") else False
         params["phylogeny_loss"] = params["phylogeny_loss"] if check_valid(params,"phylogeny_loss") else False
         params["phylogeny_loss_epsilon"] = params["phylogeny_loss_epsilon"] if check_valid(params,"phylogeny_loss_epsilon") else 0.03
-        
+        params["tripletEnabled"] = params["tripletEnabled"] if check_valid(params,"tripletEnabled") else False
+        params["tripletSamples"] = params["tripletSamples"] if check_valid(params,"tripletSamples") else 10
+        params["tripletSelector"] = params["tripletSelector"] if check_valid(params,"tripletSelector") else "semihard"
+        params["tripletMargin"] = params["tripletMargin"] if check_valid(params,"tripletMargin") else 2
+
         return params
 
 def check_valid(params, key):

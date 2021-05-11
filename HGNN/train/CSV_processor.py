@@ -143,6 +143,14 @@ class CSV_processor:
 
 
 
+    def get_target_from_layerName(self, batch, layer_name):
+        result = None
+        if layer_name == 'layer2':
+            result = batch['coarse']
+        elif layer_name == 'layer4':
+            result = batch['fine']
+            
+        return result
 
 
 
