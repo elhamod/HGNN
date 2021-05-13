@@ -169,6 +169,9 @@ class ConfigParser:
         params["tripletSamples"] = params["tripletSamples"] if check_valid(params,"tripletSamples") else 10
         params["tripletSelector"] = params["tripletSelector"] if check_valid(params,"tripletSelector") else "semihard"
         params["tripletMargin"] = params["tripletMargin"] if check_valid(params,"tripletMargin") else 2
+        params["pretrained"] = params["pretrained"] if check_valid(params,"pretrained") else True
+        params["epochs"] = params["epochs"] if check_valid(params,"epochs") else 500
+        params["patience"] = params["patience"] if check_valid(params,"patience") else 5
 
         return params
 

@@ -147,7 +147,9 @@ class CSV_processor:
         result = None
         if layer_name == 'layer2':
             result = batch['coarse']
-        elif layer_name == 'layer4':
+        elif ('layer4' in batch) and (layer_name == 'layer4'):
+            result = batch['fine']
+        elif ('layer3' in batch) and (layer_name == 'layer3'):
             result = batch['fine']
             
         return result

@@ -23,6 +23,8 @@ from myhelpers.earlystopping import EarlyStopping
 from myhelpers.try_warning import try_running
 from myhelpers.resnet_cifar import cifar_resnet56
 from myhelpers.resnet_cifar2 import cifar100
+from myhelpers.preresnet_cifar import resnet as preresnet_cifar
+from myhelpers.resnet import resnet56
 from myhelpers.adaptive_smoothing import get_lambdas
 from myhelpers.tripletloss import get_tripletLossLoader, get_triplet_criterion
 from myhelpers.iterator import Infinite_iter
@@ -121,16 +123,26 @@ def get_conv(input_res, output_res, input_num_of_channels, intermediate_num_of_c
 
 def create_pretrained_model(params):
     tl_model = params["tl_model"]
+    inpt_size = params["img_res"]
+    pretrained = params["pretrained"]
     tl_freeze = False
     
     if tl_model == "CIFAR":
         #TODO: bring this back
-        model = cifar_resnet56(pretrained='cifar100')
+        model = cifar_resnet56(pretrained='cifar100' if pretrained else False)
         # model = cifar100(128, pretrained=True)
     elif tl_model == "ResNet18":
-        model = models.resnet18(pretrained=True)
+        model = models.resnet18(pretrained=pretrained)
     elif tl_model == "ResNet50":
-        model = models.resnet50(pretrained=True)
+        model = models.resnet50(pretrained=pretrained)
+    elif tl_model == "ResNet56":
+        if pretrained:
+            raise Exception('Cannot find pretrained ResNet56')
+        model = resnet56(pretrained=pretrained)
+    elif tl_model == "preResNet":
+        if pretrained:
+            raise Exception('Cannot find pretrained preResNet')
+        model = preresnet_cifar(dataset='cifar100', inpt_size=inpt_size)
     else:
         raise Exception('Unknown network type')
         
@@ -229,7 +241,7 @@ class CNN_One_Net(nn.Module):
         #     self.g_y_fc = self.network_fine.fc
         # else:
         #     self.g_y_fc = get_fc(num_ftrs_fine, self.numberOfFine, num_of_layers=fc_layers)
-        if tl_model != "CIFAR":
+        if self.numberOfFine != self.pretrained.fc.out_features:
             self.pretrained.fc = get_fc(num_ftrs_fine, self.numberOfFine, num_of_layers=fc_layers)
 
 
@@ -309,12 +321,13 @@ class CNN_One_Net_Triplet_Wrapper(nn.Module):
         tripletLossSpace_dim = self.network_fine.numberOfFine
         self.intermediate_outputs = {}
         for c in self.network_fine.intermediate_outputs:
-            temp = self.network_fine.intermediate_outputs[c]
-            rand_input = torch.rand(1, 3, self.network_fine.img_res, self.network_fine.img_res)
-            if self.network_fine.device is not None:
-                rand_input = rand_input.cuda()
-            features = temp(rand_input)
-            num_of_inputs = torch.flatten(features).shape[0]
+            with torch.set_grad_enabled(False):
+                temp = self.network_fine.intermediate_outputs[c]
+                rand_input = torch.rand(1, 3, self.network_fine.img_res, self.network_fine.img_res)
+                if self.network_fine.device is not None:
+                    rand_input = rand_input.cuda()
+                features = temp(rand_input)
+                num_of_inputs = torch.flatten(features).shape[0]
             k = nn.Sequential(collections.OrderedDict([
                 ('flatten__'+str(c), Flatten()),
                 ('linear__'+str(c), nn.Linear(num_of_inputs, tripletLossSpace_dim)),
@@ -606,8 +619,8 @@ class Phylogeny_MSE():
 
 
 def trainModel(train_loader, validation_loader, params, model, savedModelName, test_loader=None, device=None, detailed_reporting=False):  
-    n_epochs = 500
-    patience = 5
+    n_epochs = params["epochs"]
+    patience = params["patience"] if params["patience"] > 0 else n_epochs
     learning_rate = params["learning_rate"]
     modelType = params["modelType"]
     HGNN_layers =['fine', 'coarse']
@@ -659,7 +672,9 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     optimizer = torch.optim.SGD(model.parameters(),momentum=0.9, nesterov=True, lr = learning_rate, weight_decay=weight_decay)
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 6, eta_min=learning_rate*0.1)
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 2, gamma=0.5)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=patience-2)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [100, 150])
+    #TODO: put this back for results repoprted in wandb alpha and lr
+    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=patience-2)
 
     # early stopping
     early_stopping = EarlyStopping(path=savedModelName, patience=patience)
@@ -829,7 +844,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
             #         if (loader_name != 'test') or detailed_reporting:
             #             triplet_model()
 
-            scheduler.step(validation_fine_f1)
+            scheduler.step()
             
             row_information = {
                 'epoch': epoch,
