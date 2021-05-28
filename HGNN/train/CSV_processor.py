@@ -143,14 +143,15 @@ class CSV_processor:
 
 
 
-    def get_target_from_layerName(self, batch, layer_name):
+    def get_target_from_layerName(self, batch, layer_name, hierarchyBased=True, z_triplet=None):
         result = None
         if layer_name == 'layer2':
-            result = batch['coarse']
-        elif ('layer4' in batch) and (layer_name == 'layer4'):
-            result = batch['fine']
-        elif ('layer3' in batch) and (layer_name == 'layer3'):
-            result = batch['fine']
+            result = batch['coarse' if hierarchyBased==True else 'fine']
+        elif (z_triplet is not None) and ('layer4' in z_triplet):
+            if (layer_name == 'layer4'):
+                result = batch['fine']
+        elif (z_triplet is not None) and ('layer3' in z_triplet) and (layer_name == 'layer3'):
+                result = batch['fine']
             
         return result
 

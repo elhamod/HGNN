@@ -172,6 +172,12 @@ class ConfigParser:
         params["pretrained"] = params["pretrained"] if check_valid(params,"pretrained") else True
         params["epochs"] = params["epochs"] if check_valid(params,"epochs") else 500
         params["patience"] = params["patience"] if check_valid(params,"patience") else 5
+        params["scheduler"] = params["scheduler"] if check_valid(params,"scheduler") else "plateau"
+        params["optimizer"] = params["optimizer"] if check_valid(params,"optimizer") else "SGD"
+        params["weightdecay"] = params["weightdecay"] if check_valid(params,"weightdecay") else 0.0001
+        params["scheduler_patience"] = params["scheduler_patience"] if check_valid(params,"scheduler_patience") else -1
+        params["scheduler_gamma"] = params["scheduler_gamma"] if check_valid(params,"scheduler_gamma") else 0.5
+        params["regularTripletLoss"] = params["regularTripletLoss"] if check_valid(params,"regularTripletLoss") else False
 
         return params
 

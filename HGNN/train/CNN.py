@@ -3,7 +3,7 @@ import os
 import torch
 import csv
 import time
-from scipy.stats import entropy
+# from scipy.stats import entropy
 import collections
 import pandas as pd
 import torchvision.models as models
@@ -11,8 +11,12 @@ from torch.nn import Module
 from sklearn.metrics import f1_score, accuracy_score
 import json
 from tqdm import tqdm
-import math
 from torchsummary import summary
+from adabelief_pytorch import AdaBelief
+
+
+from .criterion_phylogeny_KLDiv import Phylogeny_KLDiv
+from .criterion_phylogeny_MSE import Phylogeny_MSE
 
 try:
     import wandb
@@ -29,6 +33,7 @@ from myhelpers.adaptive_smoothing import get_lambdas
 from myhelpers.tripletloss import get_tripletLossLoader, get_triplet_criterion
 from myhelpers.iterator import Infinite_iter
 from myhelpers.memory import get_cuda_memory
+from myhelpers.create_conv_layer import get_conv
 
 
 modelFinalCheckpoint = 'finalModel.pt'
@@ -53,7 +58,6 @@ WANDB_message="wandb not working"
 
 saved_models_per_iteration_frequency = 1
 
-
 class ZeroModule(Module):
     def __init__(self, *args, **kwargs):
         super(torch.nn.Identity, self).__init__()
@@ -66,56 +70,17 @@ class Flatten(torch.nn.Module):
         return input.view(input.size(0), -1)
 
 # Create an FC layer with RELU and BatchNormalization
-def get_fc(num_of_inputs, num_of_outputs, num_of_layers = 1):
+def get_fc(num_of_inputs, num_of_outputs, num_of_layers = 1, bnorm=False, relu=False):
     l = [] 
     
     for i in range(num_of_layers):
         n_out = num_of_inputs if (i+1 != num_of_layers) else num_of_outputs
         l.append(('linear'+str(i), torch.nn.Linear(num_of_inputs, n_out)))
-        l.append(('bnorm'+str(i), torch.nn.BatchNorm1d(n_out)))
-        l.append(('relu'+str(i), torch.nn.ReLU()))
+        if bnorm == True:
+            l.append(('bnorm'+str(i), torch.nn.BatchNorm1d(n_out)))
+        if relu == True:
+            l.append(('relu'+str(i), torch.nn.ReLU()))
         
-    d = collections.OrderedDict(l)
-    seq = torch.nn.Sequential(d)
-    
-    return seq
-
-def get_output_res(input_res, kernel_size, stride, padding):
-    return math.floor((input_res + 2*padding - kernel_size)/stride +1)
-
-# Create an Conv layer with RELU and BatchNormalization
-def get_conv(input_res, output_res, input_num_of_channels, intermediate_num_of_channels, output_num_of_channels, num_of_layers = 1, kernel_size=3, stride=1, padding=1):
-    #  Sanity checks 
-    assert(input_res >= output_res)
-    needed_downsampling_layers=0
-    res = input_res
-    for i in range(num_of_layers):
-        intermediate_output_res = get_output_res(res, kernel_size, stride, padding)
-        assert(intermediate_output_res <= res)
-        needed_downsampling_layers = needed_downsampling_layers + 1
-        res = intermediate_output_res
-        if intermediate_output_res == output_res:
-            break
-
-    l = [] 
-    
-    # First k layers no downsampling
-    in_ = input_num_of_channels
-    for i in range(num_of_layers - needed_downsampling_layers):
-        out_ = intermediate_num_of_channels if i<num_of_layers-1 else output_num_of_channels
-        l.append(('conv'+str(i), torch.nn.Conv2d(in_, out_, kernel_size=1, stride=1, padding=0, bias=False)))
-        l.append(('bnorm'+str(i), torch.nn.BatchNorm2d(out_)))
-        l.append(('relu'+str(i), torch.nn.ReLU()))
-        in_ = out_
-
-    # Then downsample each remaining layer till we get to the desired output resolution 
-    for i in range(needed_downsampling_layers):
-        out_ = output_num_of_channels if i + num_of_layers - needed_downsampling_layers == num_of_layers-1 else intermediate_num_of_channels
-        l.append(('conv'+str(i+needed_downsampling_layers), torch.nn.Conv2d(in_, out_, kernel_size=kernel_size, stride=stride, padding=padding, bias=False)))
-        l.append(('bnorm'+str(i+needed_downsampling_layers), torch.nn.BatchNorm2d(out_)))
-        l.append(('relu'+str(i+needed_downsampling_layers), torch.nn.ReLU()))
-        in_ = out_
-
     d = collections.OrderedDict(l)
     seq = torch.nn.Sequential(d)
     
@@ -125,12 +90,11 @@ def create_pretrained_model(params):
     tl_model = params["tl_model"]
     inpt_size = params["img_res"]
     pretrained = params["pretrained"]
-    tl_freeze = False
     
     if tl_model == "CIFAR":
         #TODO: bring this back
-        model = cifar_resnet56(pretrained='cifar100' if pretrained else False)
-        # model = cifar100(128, pretrained=True)
+        model = cifar_resnet56(pretrained='cifar100' if pretrained else None) # 0.693
+        # model = cifar100(128, pretrained=True) # acc = 0.589
     elif tl_model == "ResNet18":
         model = models.resnet18(pretrained=pretrained)
     elif tl_model == "ResNet50":
@@ -138,15 +102,16 @@ def create_pretrained_model(params):
     elif tl_model == "ResNet56":
         if pretrained:
             raise Exception('Cannot find pretrained ResNet56')
-        model = resnet56(pretrained=pretrained)
+        model = resnet56()
     elif tl_model == "preResNet":
-        if pretrained:
-            raise Exception('Cannot find pretrained preResNet')
-        model = preresnet_cifar(dataset='cifar100', inpt_size=inpt_size)
+        model = preresnet_cifar(dataset='cifar100', inpt_size=inpt_size, pretrained=pretrained if pretrained==True else None)
     else:
         raise Exception('Unknown network type')
         
-    num_ftrs = model.fc.in_features
+    try:
+        num_ftrs = model.fc.in_features
+    except:
+        num_ftrs = model.classifier[0].in_features
         
     return model, num_ftrs
 
@@ -205,17 +170,9 @@ class CNN_One_Net(nn.Module):
     def __init__(self, architecture, params, device=None):
         fc_layers = params["fc_layers"]
         img_res = params["img_res"]
-        # link_layer = params["link_layer"]
-        triplet_enabled = link_layer = params["tripletEnabled"]
-        tl_model = params["tl_model"]
         self.img_res = img_res
-        
-        # model, num_ftrs = create_pretrained_model(params)
-        # fc = get_fc(num_ftrs, architecture["fine"], fc_layers)
-        # model.fc = fc
 
         self.numberOfFine = architecture["fine"]
-        # self.numberOfCoarse = architecture["coarse"]
         self.device=device
 
         if device is None:
@@ -226,45 +183,43 @@ class CNN_One_Net(nn.Module):
         # The pretrained models
         self.pretrained, num_ftrs_fine = create_pretrained_model(params)
         
-        # # h_y block
-        # self.h_y = torch.nn.Sequential(*getCustomTL_layer(self.network_fine, None, link_layer)) 
+        try:
+            if self.numberOfFine != self.pretrained.fc.out_features:
+                self.pretrained.fc = get_fc(num_ftrs_fine, self.numberOfFine, num_of_layers=fc_layers)
+                # print('fc replaced!')
+        except:
+            if self.numberOfFine != self.pretrained.classifier[0].out_features:
+                self.pretrained.classifier[0] = get_fc(num_ftrs_fine, self.numberOfFine, num_of_layers=fc_layers)
+                # print('fc replaced!')
 
-        # # print('hy')
-        # # summary(self.h_y.cuda(), (3, 32, 32))
-
-        # # g_y block
-        # self.g_y = torch.nn.Sequential(*getCustomTL_layer(self.network_fine, link_layer, None),  
-        #                                Flatten())
-
-    
-        # if tl_model == "CIFAR":
-        #     self.g_y_fc = self.network_fine.fc
-        # else:
-        #     self.g_y_fc = get_fc(num_ftrs_fine, self.numberOfFine, num_of_layers=fc_layers)
-        if self.numberOfFine != self.pretrained.fc.out_features:
-            self.pretrained.fc = get_fc(num_ftrs_fine, self.numberOfFine, num_of_layers=fc_layers)
-
-
-        intermediate_output_layers = ['layer1','layer2','layer3','layer4']
-        self.intermediate_outputs = {}
-        for layer_name in intermediate_output_layers:
-            # Not all layers may exist. e.g. CIFAR_ResNet only has 3 layers.
+        self.intermediate_output_layers = ['layer1','layer2','layer3','layer4']
+        for layer_ in self.intermediate_output_layers:
             try:
-                self.intermediate_outputs[layer_name] = torch.nn.Sequential(*getCustomTL_layer(self.pretrained, from_layer=None, to_layer=layer_name))
+                layer = self.get_module(layer_)
+                layer.register_forward_hook(self.get_activation(layer_))
             except:
-                pass
-    
-        self.intermediate_outputs = torch.nn.ModuleDict(self.intermediate_outputs)
+                print(layer_, 'not found')
 
         if device is not None:
-        #     self.g_y = self.g_y.cuda()
-        #     self.h_y = self.h_y.cuda()
-        #     self.g_y_fc = self.g_y_fc.cuda()
             self.pretrained = self.pretrained.cuda()
-            for intermediate_output_name in self.intermediate_outputs:
-                intermediate_output = self.intermediate_outputs[intermediate_output_name]
-                intermediate_output = intermediate_output.cuda() 
 
+    def get_module(self,name):
+        if name == 'layer1':
+            return self.pretrained.layer1
+        elif name == 'layer2':
+            return self.pretrained.layer2
+        elif name == 'layer3':
+            return self.pretrained.layer3
+        elif name == 'layer4':
+            return self.pretrained.layer4
+        else:
+            raise Exception('layer not found')
+    
+    def get_activation(self, name):
+        def hook(model, input, output, detach=False):
+            self.activation[name] = output.detach() if detach==True else output
+        return hook
+    
     # Prediction
     def forward(self, x):
         return self.activations(x)
@@ -284,33 +239,19 @@ class CNN_One_Net(nn.Module):
         "coarse" : False
     }
     def activations(self, x, outputs=default_outputs):  
-        # # print(x.shape)
-        # hy_features = self.h_y(x)
-        # # print(hy_features.shape)
 
-        # hb_hy_features = hy_features
-        
-        # gy_features = self.g_y(hb_hy_features)
-        # # print('gy_features', gy_features.shape)
-        # y = self.g_y_fc(gy_features)
-        # # print('y', y.shape)
-
-        activations = {
+        self.activation = {
             "input": x,
-            # "hy_features": hy_features,
-            # "hb_features": None,
-            # "hb_hy_features": hb_hy_features,
-            # "gy_features": gy_features,
-            # "gc_features": None,
             "coarse": None,
-            "fine":  self.pretrained(x)
         }
 
-        for intermediate_output_name in self.intermediate_outputs:
-            intermediate_output = self.intermediate_outputs[intermediate_output_name]
-            activations[intermediate_output_name] = intermediate_output(x).detach()
+        y = self.pretrained(x)
 
-        return activations
+        self.activation['fine'] = y
+        activation = self.activation
+        self.activation = None
+
+        return activation
 
 class CNN_One_Net_Triplet_Wrapper(nn.Module):
     def __init__(self, network_fine):
@@ -320,31 +261,37 @@ class CNN_One_Net_Triplet_Wrapper(nn.Module):
     
         tripletLossSpace_dim = self.network_fine.numberOfFine
         self.intermediate_outputs = {}
-        for c in self.network_fine.intermediate_outputs:
-            with torch.set_grad_enabled(False):
-                temp = self.network_fine.intermediate_outputs[c]
-                rand_input = torch.rand(1, 3, self.network_fine.img_res, self.network_fine.img_res)
-                if self.network_fine.device is not None:
-                    rand_input = rand_input.cuda()
-                features = temp(rand_input)
-                num_of_inputs = torch.flatten(features).shape[0]
-            k = nn.Sequential(collections.OrderedDict([
-                ('flatten__'+str(c), Flatten()),
-                ('linear__'+str(c), nn.Linear(num_of_inputs, tripletLossSpace_dim)),
-                ('bnorm__'+str(c), nn.BatchNorm1d(tripletLossSpace_dim)),
-                ('relu__'+str(c), nn.ReLU()),
-            ]))
-            self.intermediate_outputs[c] = torch.nn.Sequential(*temp, *k)
+
+        # with torch.set_grad_enabled(False):
+        with torch.no_grad():
+            rand_input = torch.rand(2, 3, self.network_fine.img_res, self.network_fine.img_res)
+            if self.network_fine.device is not None:
+                rand_input = rand_input.cuda()
+                
+            isTraining=self.network_fine.training
+            if isTraining:
+                self.network_fine.eval()
+            out_ = self.network_fine(rand_input)
+            if isTraining:
+                self.network_fine.train()
+
+        for c in self.network_fine.intermediate_output_layers:
+            if c in out_:
+                features = out_[c]
+                num_of_inputs = torch.flatten(features[1:]).shape[0]
+                k = nn.Sequential(collections.OrderedDict([
+                    ('flatten__'+str(c), Flatten()),
+                    ('linear__'+str(c), nn.Linear(num_of_inputs, tripletLossSpace_dim)),
+                    # ('bnorm__'+str(c), nn.BatchNorm1d(tripletLossSpace_dim)),
+                    # ('relu__'+str(c), nn.ReLU()),
+                ]))
+                self.intermediate_outputs[c] = k
         self.intermediate_outputs = torch.nn.ModuleDict(self.intermediate_outputs)
 
         if self.network_fine.device is not None:
             for intermediate_output_name in self.intermediate_outputs:
                 intermediate_output = self.intermediate_outputs[intermediate_output_name]
-                intermediate_output = intermediate_output.cuda() 
-
-#         print(self)
-        # print("cnn_wrapper")
-        # summary(self, (3, self.img_res, self.img_res), device="cpu")
+                intermediate_output = intermediate_output.cuda()
             
 
     # Prediction
@@ -353,10 +300,8 @@ class CNN_One_Net_Triplet_Wrapper(nn.Module):
 
         for intermediate_output_name in self.intermediate_outputs:
             intermediate_output = self.intermediate_outputs[intermediate_output_name]
-            # print(x.shape)
-            # print(intermediate_output)
-            # print(summary(intermediate_output, (3, 32, 32)))
-            activations[intermediate_output_name] = intermediate_output(x)
+            activations_sub = activations[intermediate_output_name]
+            activations[intermediate_output_name] = intermediate_output(activations_sub)
 
         return activations
 
@@ -535,87 +480,8 @@ def f1_criterion(device):
     return lambda pred, true : torch.reciprocal(torch.tensor(get_f1(*getPredictions(pred, true), device=device), requires_grad=True))
 
 
-# ----Escort criterion
-def escort_function(x, p=2):
-    x_exp = torch.abs(x)**p
-    x_exp_sum = torch.sum(x_exp, 1, keepdim=True)
-    answer = x_exp/x_exp_sum
-
-    return answer
-
-def escort_criterion(device):
-    criterion = nn.KLDivLoss()
-    if device is not None:
-        criterion = criterion.cuda()
-    return lambda pred, true : criterion((escort_function(pred)+ 1e-7).log(), nn.functional.one_hot(true, num_classes=pred.shape[1]).float())
-#------
 
 
-# ----Phylogeny criterion
-class Phylogeny_KLDiv():
-    def __init__(self, distance_matrix):
-        self.distance_matrix = distance_matrix
-        self.cuda_=False
-
-    def __call__(self, pred, true):
-        # print(true[0], pred[0,:])
-        # sum_w = torch.sum(self.distance_matrix[true, :], 1).reshape(-1, 1)
-        max_w = torch.max(self.distance_matrix[true, :], 1)[0].reshape(-1, 1)
-        # w = self.distance_matrix[true, :]/ sum_w
-        # w = self.distance_matrix[true, :]/ max_w
-        w = max_w - self.distance_matrix[true, :]
-        # print('w', w[0,:])
-
-        loss = torch.nn.KLDivLoss()
-        loss2 = torch.nn.LogSoftmax(dim=1)
-        loss3 = torch.nn.Softmax(dim=1)
-        temp = loss2(pred)
-        # print('1', loss3(pred)[0, :])
-        temp2 = loss3(w)
-        # print('1_', temp2[0, :])
-
-        # Select ones that are incorrect:
-        # filter_ = (torch.max(pred, 1)[1].reshape(-1, 1) != true.reshape(-1, 1)).reshape(-1)
-        # temp = temp[filter_, :]
-        # temp2 = temp2[filter_, :]
-
-        temp = loss(temp, temp2)
-
-        # print('--')
-        # print('2', temp)
-
-        return temp
-
-    def cuda(self):
-        self.cuda_ = True
-        self.distance_matrix = self.distance_matrix.cuda()
-        return self
-#------
-
-
-
-# ----Phylogeny criterion
-class Phylogeny_MSE():
-    def __init__(self, distance_matrix, phylogeny_loss_epsilon):
-        self.criterion = nn.MSELoss()
-        self.distance_matrix = distance_matrix
-        self.epsilon = phylogeny_loss_epsilon
-
-    def __call__(self, pred, true):
-        # get d[true, :]
-        d = self.distance_matrix[true, :] + self.epsilon
-
-        # get inv
-        inv_d = 1/d
-
-        # get MSE
-        return self.criterion(inv_d, pred)   
-
-    def cuda(self):
-        self.criterion = self.criterion.cuda()
-        self.distance_matrix = self.distance_matrix.cuda()
-        return self
-#------
 
 
 def trainModel(train_loader, validation_loader, params, model, savedModelName, test_loader=None, device=None, detailed_reporting=False):  
@@ -631,6 +497,12 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     use_phylogeny_loss = params["phylogeny_loss"]
     phylogeny_loss_epsilon = params["phylogeny_loss_epsilon"]
     tripletEnabled = params["tripletEnabled"]
+    scheduler_type = params["scheduler"]
+    optimizer_type = params["optimizer"]
+    weight_decay = params["weightdecay"]
+    scheduler_patience = params["scheduler_patience"] if params["scheduler_patience"] > 0 else n_epochs
+    scheduler_gamma = params["scheduler_gamma"]
+    regularTripletLoss = params["regularTripletLoss"]
 
     if tripletEnabled:
         triplet_layers = ['layer1','layer2','layer3','layer4']
@@ -639,8 +511,8 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
         n_samples = params["tripletSamples"]
         margin = params["tripletMargin"]
         selection_criterion = params["tripletSelector"]
-        triplet_criterion = get_triplet_criterion(margin, selection_criterion, device is None)
-        triplets_train_loader = get_tripletLossLoader(train_loader.dataset, n_samples, cuda=device)
+        triplet_criterion = get_triplet_criterion(margin, selection_criterion, not regularTripletLoss, device is None)
+        triplets_train_loader = get_tripletLossLoader(train_loader.dataset, n_samples)
         # triplets_validation_loader = get_tripletLossLoader(validation_loader.dataset, n_samples, cuda=device)
         # triplets_test_loader = get_tripletLossLoader(test_loader.dataset, n_samples, cuda=device) if test_loader is not None else None
         triplet_train_iterator = Infinite_iter(triplets_train_loader)
@@ -654,7 +526,6 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     if adaptive_smoothing_enabled:
         df_adaptive_smoothing = pd.DataFrame()
 
-    weight_decay = 0.0005
     isBlackbox = (modelType == "BB")
     isDSN = (modelType == "DSN")
 
@@ -669,12 +540,26 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     if not os.path.exists(saved_models_per_iteration):
         os.makedirs(saved_models_per_iteration)
 
-    optimizer = torch.optim.SGD(model.parameters(),momentum=0.9, nesterov=True, lr = learning_rate, weight_decay=weight_decay)
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 6, eta_min=learning_rate*0.1)
-    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 2, gamma=0.5)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [100, 150])
-    #TODO: put this back for results repoprted in wandb alpha and lr
-    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=patience-2)
+    if optimizer_type == "Adam":
+        optimizer = torch.optim.Adam(model.parameters(), lr = learning_rate, weight_decay=weight_decay)
+    elif optimizer_type == "SGD":
+        optimizer = torch.optim.SGD(model.parameters(),momentum=0.9, nesterov=True, lr = learning_rate, weight_decay=weight_decay)
+    elif optimizer_type == 'adabelief':
+        optimizer = AdaBelief(model.parameters(), lr=learning_rate, weight_decay=weight_decay, eps=1e-16, betas=(0.9,0.999), weight_decouple = True, rectify = True)
+        # optimizer = AdaBelief(model.parameters(), lr=learning_rate, weight_decay=weight_decay, eps=1e-8, betas=(0.9,0.999), weight_decouple = (scheduler_type!="cifar"), rectify = False)
+    else:
+        raise Exception("Unknown optimizer")
+
+    if scheduler_type == "cifar":
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [100, 150])
+    elif scheduler_type == "step":
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, scheduler_patience, gamma=scheduler_gamma)
+    elif scheduler_type == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, scheduler_patience, eta_min=learning_rate*scheduler_gamma)
+    elif scheduler_type == "plateau":    
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=scheduler_gamma, patience=scheduler_patience)
+    elif scheduler_type != "noscheduler": 
+        raise Exception("scheduler type not found")
 
     # early stopping
     early_stopping = EarlyStopping(path=savedModelName, patience=patience)
@@ -747,10 +632,14 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                             elif tripletEnabled:
                                     # get loss from criterion 
                                     if (loss_name in z_triplet) and z_triplet[loss_name] is not None:
-                                        # print('layer', z_sub)
                                         # Check if this layer has a triplet loss implemented
-                                        if train_loader.dataset.csv_processor.get_target_from_layerName(batch_triplet, loss_name) is not None:
+                                        if train_loader.dataset.csv_processor.get_target_from_layerName(batch_triplet, loss_name, not regularTripletLoss, z_triplet) is not None:
                                             losses[loss_name], nonzerotriplets[loss_name] = triplet_criterion(z_triplet, batch_triplet, loss_name, train_loader.dataset.csv_processor)
+
+                                            if selection_criterion=="semihard":  
+                                                # print(losses[loss_name])
+                                                assert (losses[loss_name]-margin).le(torch.zeros_like(losses[loss_name])).all()
+                                            
                                             if detailed_reporting:
                                                 z_triplet_layer = z_triplet[loss_name]
                                                 if device is not None:
@@ -801,12 +690,22 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
 
             getCoarse = not isDSN and not isBlackbox
             
+            if test_loader:
+                predlist_test, lbllist_test = getLoaderPredictionProbabilities(test_loader, model, params, device=device)
+                predlist_test, lbllist_test = getPredictions(predlist_test, lbllist_test)
+                test_fine_f1 = get_f1(predlist_test, lbllist_test, device=device)
+                test_fine_acc = get_f1(predlist_test, lbllist_test, device=device, acc=True)
+                if (not isDSN) and detailed_reporting:
+                    predlist_test, lbllist_test = getLoaderPredictionProbabilities(test_loader, model, params, 'coarse', device=device)
+                    predlist_test, lbllist_test = getPredictions(predlist_test, lbllist_test)
+                    test_coarse_f1 = get_f1(predlist_test, lbllist_test, device=device)
+            
             predlist_val, lbllist_val = getLoaderPredictionProbabilities(validation_loader, model, params, device=device)
             validation_loss = getCrossEntropy(predlist_val, lbllist_val)
             predlist_val, lbllist_val = getPredictions(predlist_val, lbllist_val)
             validation_fine_f1 = get_f1(predlist_val, lbllist_val, device=device)
 
-            if not isDSN:
+            if detailed_reporting and not isDSN:
                 predlist_val, lbllist_val = getLoaderPredictionProbabilities(validation_loader, model, params, 'coarse', device=device)
                 if getCoarse:
                     validation_coarse_loss = getCrossEntropy(predlist_val, lbllist_val)
@@ -817,6 +716,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
             training_loss = getCrossEntropy(predlist_train, lbllist_train)
             predlist_train, lbllist_train = getPredictions(predlist_train, lbllist_train)
             train_fine_f1 = get_f1(predlist_train, lbllist_train, device=device)
+            train_fine_acc = get_f1(predlist_train, lbllist_train, device=device, acc=True)
 
             if detailed_reporting and not isDSN:
                 predlist_train, lbllist_train = getLoaderPredictionProbabilities(train_loader, model, params, 'coarse', device=device)
@@ -825,33 +725,20 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                     predlist_train, lbllist_train = getPredictions(predlist_train, lbllist_train)
                     training_coarse_f1 = get_f1(predlist_train, lbllist_train, device=device)
 
-            if test_loader:
-                predlist_test, lbllist_test = getLoaderPredictionProbabilities(test_loader, model, params, device=device)
-                predlist_test, lbllist_test = getPredictions(predlist_test, lbllist_test)
-                test_fine_f1 = get_f1(predlist_test, lbllist_test, device=device)
-                if (not isDSN) and detailed_reporting:
-                    predlist_test, lbllist_test = getLoaderPredictionProbabilities(test_loader, model, params, 'coarse', device=device)
-                    predlist_test, lbllist_test = getPredictions(predlist_test, lbllist_test)
-                    test_coarse_f1 = get_f1(predlist_test, lbllist_test, device=device)
-
-            # Triplet loss reporting
-            # if tripletEnabled:
-            #     loaders = { 'train': triplets_train_loader, 
-            #                 'val': triplets_validation_loader, 
-            #                 'test': triplets_test_loader]
-                
-            #     for loader_name in loaders:
-            #         if (loader_name != 'test') or detailed_reporting:
-            #             triplet_model()
-
-            scheduler.step()
+            if epoch != 0 and scheduler_type != "noscheduler":
+                if scheduler_type != "plateau":
+                    scheduler.step() 
+                else:
+                    scheduler.step(validation_fine_f1)   
             
             row_information = {
                 'epoch': epoch,
                 'learning rate': optimizer.param_groups[0]['lr'],
                 'validation_fine_f1': validation_fine_f1,
                 'training_fine_f1': train_fine_f1,
+                'training_fine_acc': train_fine_acc,
                 'test_fine_f1': test_fine_f1 if test_loader else None,
+                'test_fine_acc': test_fine_acc if test_loader else None,
                 'validation_loss': validation_loss,
                 'training_loss':  training_loss if detailed_reporting else None,
 
@@ -897,7 +784,8 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
         time_elapsed = end - start
         
         # load the last checkpoint with the best model
-        model.load_state_dict(early_stopping.getBestModel())
+        if epochs > 0:
+            model.load_state_dict(early_stopping.getBestModel())
             
         
         # save information
@@ -923,12 +811,19 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
             f.close() 
 
 
-        wandb.run.summary["validation_fine_f1"] = -1/early_stopping.best_score 
+        predlist_val, lbllist_val = getLoaderPredictionProbabilities(validation_loader, model, params, device=device)
+        predlist_val, lbllist_val = getPredictions(predlist_val, lbllist_val)
+        validation_fine_f1 = get_f1(predlist_val, lbllist_val, device=device)
+
 
         predlist_test, lbllist_test = getLoaderPredictionProbabilities(test_loader, model, params, device=device)
         predlist_test, lbllist_test = getPredictions(predlist_test, lbllist_test)
         test_fine_f1 = get_f1(predlist_test, lbllist_test, device=device)
-        wandb.run.summary["test_fine_f1"] = test_fine_f1
+        test_fine_acc = get_f1(predlist_test, lbllist_test, device=device, acc=True)
+        if wandb.run is not None:
+            wandb.run.summary["validation_fine_f1"] = validation_fine_f1
+            wandb.run.summary["test_fine_f1"] = test_fine_f1
+            wandb.run.summary["test_fine_acc"] = test_fine_acc
     
     return df, epochs, time_elapsed
 
@@ -1039,13 +934,13 @@ def getPredictions(predlist, lbllist):
     return predlist, lbllist
 
 # Takes predictions
-def get_f1(predlist, lbllist, device=None):
+def get_f1(predlist, lbllist, device=None, acc=False):
     if device is not None:
         predlist = predlist.cpu()
         lbllist = lbllist.cpu()   
-    #TODO changeme back
-    return f1_score(lbllist, predlist, average='macro')
-    # return accuracy_score(lbllist, predlist)
+    if acc == False:
+        return f1_score(lbllist, predlist, average='macro')
+    return accuracy_score(lbllist, predlist)
 
 # Returns the distance between examples in terms of classification cross entropy
 # Augmentation should be disabled
