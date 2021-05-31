@@ -490,10 +490,17 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     learning_rate = params["learning_rate"]
     modelType = params["modelType"]
     HGNN_layers =['fine', 'coarse']
-    lambdas = {
-        'fine': 1,
-        'coarse': params["lambda"],
-    }
+    two_phase_lambda = params["two_phase_lambda"]
+    if two_phase_lambda==False:
+        lambdas = {
+            'fine': 1,
+            'coarse': params["lambda"],
+        }
+    else:
+        lambdas = {
+            'fine': params["lambda"],
+            'coarse': 1,
+        }    
     use_phylogeny_loss = params["phylogeny_loss"]
     phylogeny_loss_epsilon = params["phylogeny_loss_epsilon"]
     tripletEnabled = params["tripletEnabled"]
@@ -507,11 +514,16 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     if tripletEnabled:
         triplet_layers = ['layer1','layer2','layer3','layer4']
         for layer in triplet_layers:
-            lambdas[layer] = params["lambda"]
+            if two_phase_lambda==False:
+                lambdas[layer] = params["lambda"]
+            else:
+                lambdas[layer] = 1
         n_samples = params["tripletSamples"]
         margin = params["tripletMargin"]
         selection_criterion = params["tripletSelector"]
-        triplet_criterion = get_triplet_criterion(margin, selection_criterion, not regularTripletLoss, device is None)
+        triplet_layers_dic = params["triplet_layers_dic"].split(',')
+        print(triplet_layers_dic)
+        triplet_criterion = get_triplet_criterion(margin, selection_criterion, not regularTripletLoss, triplet_layers_dic, device)
         triplets_train_loader = get_tripletLossLoader(train_loader.dataset, n_samples)
         # triplets_validation_loader = get_tripletLossLoader(validation_loader.dataset, n_samples, cuda=device)
         # triplets_test_loader = get_tripletLossLoader(test_loader.dataset, n_samples, cuda=device) if test_loader is not None else None
@@ -521,10 +533,10 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
         print("training model on CPU!")
     
     adaptive_smoothing_enabled = params["adaptive_smoothing"]
+    assert adaptive_smoothing_enabled != two_phase_lambda, "Cannot have adaptive smoothing and two phase lambdas at the same time"
     adaptive_lambda = None if not adaptive_smoothing_enabled else params["adaptive_lambda"]
     adaptive_alpha = None if not adaptive_smoothing_enabled else params["adaptive_alpha"]
-    if adaptive_smoothing_enabled:
-        df_adaptive_smoothing = pd.DataFrame()
+    df_adaptive_smoothing = pd.DataFrame()
 
     isBlackbox = (modelType == "BB")
     isDSN = (modelType == "DSN")
@@ -633,7 +645,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                                     # get loss from criterion 
                                     if (loss_name in z_triplet) and z_triplet[loss_name] is not None:
                                         # Check if this layer has a triplet loss implemented
-                                        if train_loader.dataset.csv_processor.get_target_from_layerName(batch_triplet, loss_name, not regularTripletLoss, z_triplet) is not None:
+                                        if train_loader.dataset.csv_processor.get_target_from_layerName(batch_triplet, loss_name, not regularTripletLoss, z_triplet, triplet_layers_dic) is not None:
                                             losses[loss_name], nonzerotriplets[loss_name] = triplet_criterion(z_triplet, batch_triplet, loss_name, train_loader.dataset.csv_processor)
 
                                             if selection_criterion=="semihard":  
@@ -656,17 +668,22 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                                 if loss_name in nonzerotriplets:
                                     adaptive_info['nonzerotriplets_'+loss_name] = nonzerotriplets[loss_name]      
                         
-                        # Adaptive smoothing
-                        if adaptive_smoothing_enabled:
+                        #Two phase training
+                        if two_phase_lambda:
+                            if epoch == int(n_epochs/2):
+                                for lambda_key in lambdas:
+                                    lambdas[lambda_key] = params["lambda"] if lambda_key!='fine' else 1
+                        # Adaptive smoothing 
+                        elif adaptive_smoothing_enabled:
                             lambdas = get_lambdas(adaptive_alpha,   
                                 adaptive_lambda, 
                                 losses['fine'], 
                                 {x: losses[x] for x in losses if x != 'fine'})
 
-                            for lambda_ in lambdas:
-                                adaptive_info['lambda_' + lambda_]= lambdas[lambda_]
+                        for lambda_ in lambdas:
+                            adaptive_info['lambda_' + lambda_]= lambdas[lambda_]
 
-                            df_adaptive_smoothing = df_adaptive_smoothing.append(pd.DataFrame(adaptive_info, index=[0]), ignore_index = True) 
+                        df_adaptive_smoothing = df_adaptive_smoothing.append(pd.DataFrame(adaptive_info, index=[0]), ignore_index = True) 
 
                         # Add up losses
                         loss = 0
@@ -795,7 +812,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
             # save results
             df.to_csv(os.path.join(savedModelName, statsFileName))  
 
-            if adaptive_smoothing_enabled and detailed_reporting:
+            if detailed_reporting:
                 df_adaptive_smoothing.to_csv(os.path.join(savedModelName, adaptiveSmoothingFileName))  
             
             with open(os.path.join(savedModelName, timeFileName), 'w', newline='') as myfile:
