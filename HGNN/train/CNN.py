@@ -510,6 +510,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     scheduler_patience = params["scheduler_patience"] if params["scheduler_patience"] > 0 else n_epochs
     scheduler_gamma = params["scheduler_gamma"]
     regularTripletLoss = params["regularTripletLoss"]
+    L1_experiment = params["L1reg"]
 
     if tripletEnabled:
         triplet_layers = ['layer1','layer2','layer3','layer4']
@@ -533,7 +534,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
         print("training model on CPU!")
     
     adaptive_smoothing_enabled = params["adaptive_smoothing"]
-    assert adaptive_smoothing_enabled != two_phase_lambda, "Cannot have adaptive smoothing and two phase lambdas at the same time"
+    assert (not adaptive_smoothing_enabled) or (not two_phase_lambda), "Cannot have adaptive smoothing and two phase lambdas at the same time"
     adaptive_lambda = None if not adaptive_smoothing_enabled else params["adaptive_lambda"]
     adaptive_alpha = None if not adaptive_smoothing_enabled else params["adaptive_alpha"]
     df_adaptive_smoothing = pd.DataFrame()
@@ -636,7 +637,23 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                             # get output of model
                             z_triplet = applyModel(batch_triplet_input, model)
 
+                        # L1 experiment
+                        if L1_experiment:
+                            loss_names = loss_names + ['layer3']
+                            lambdas["layer3"] = params["lambda"]
                         for loss_name in loss_names:
+                            if loss_name=="layer3" and L1_experiment:
+                                o = z[loss_name]
+                                w = o.shape[2]
+                                m = torch.nn.MaxPool2d(w)
+                                o2 = m(o).squeeze()
+                                max_, _ = torch.max(o2, dim=1)
+                                o2 = o2/max_.reshape(-1, 1)
+                                o2 = torch.norm(o2, dim=1)
+                                o2 = torch.mean(o2)
+                                losses["layer3"] = o2
+                            
+                            
                             if loss_name in HGNN_layers:
                                 if z[loss_name] is not None:
                                     batch_lossname = loss_name if (loss_name == 'fine') or isDSN else 'coarse'
@@ -666,7 +683,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                                 adaptive_info['loss_'+loss_name] = losses[loss_name].item() if torch.is_tensor(losses[loss_name]) else losses[loss_name]
                                 adaptive_info['lambda_'+loss_name] = lambdas[loss_name] 
                                 if loss_name in nonzerotriplets:
-                                    adaptive_info['nonzerotriplets_'+loss_name] = nonzerotriplets[loss_name]      
+                                    adaptive_info['nonzerotriplets_'+loss_name] = nonzerotriplets[loss_name]  
                         
                         #Two phase training
                         if two_phase_lambda:
@@ -679,9 +696,6 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                                 adaptive_lambda, 
                                 losses['fine'], 
                                 {x: losses[x] for x in losses if x != 'fine'})
-
-                        for lambda_ in lambdas:
-                            adaptive_info['lambda_' + lambda_]= lambdas[lambda_]
 
                         df_adaptive_smoothing = df_adaptive_smoothing.append(pd.DataFrame(adaptive_info, index=[0]), ignore_index = True) 
 

@@ -180,6 +180,7 @@ class ConfigParser:
         params["regularTripletLoss"] = params["regularTripletLoss"] if check_valid(params,"regularTripletLoss") else False
         params["triplet_layers_dic"] = params["triplet_layers_dic"] if check_valid(params,"triplet_layers_dic") else 'layer2,layer4'
         params["two_phase_lambda"] = params["two_phase_lambda"] if check_valid(params,"two_phase_lambda") else False
+        params["L1reg"] = params["L1reg"] if check_valid(params,"L1reg") else False
 
         return params
 

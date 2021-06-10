@@ -9,6 +9,7 @@ from opentree import OT
 from ete3 import Tree
 
 Fix_Tree = True
+format_ = 1 #8
 
 
 class Taxonomy:
@@ -29,10 +30,11 @@ class Taxonomy:
 
         ott_id1 = 'ott' + str(self.ott_id_dict[species1])
         ott_id2 = 'ott' + str(self.ott_id_dict[species2])
+        d = self.tree.get_distance(ott_id1, ott_id2)
         # ott_id1 = self.ott_id_dict[species1]
         # ott_id2 = self.ott_id_dict[species2]
-        # print(ott_id1, ott_id2)
-        return self.tree.get_distance(ott_id1, ott_id2)
+        # print(ott_id1, ott_id2, d)
+        return d
 
     # ------- privete functions
 
@@ -79,12 +81,12 @@ class Taxonomy:
         print(self.ott_id_dict)
 
     def fix_tree(self, fileNameAndPath):
-        tree = Tree(fileNameAndPath, format=8)
+        tree = Tree(fileNameAndPath, format=format_)
 
         # Fix Esox Americanus
         D = tree.search_nodes(name="mrcaott47023ott496121")[0]
         D.name = "ott496115"
-        tree.write(format=8, outfile=fileNameAndPath)
+        tree.write(format=format_, outfile=fileNameAndPath)
     
     def get_tree(self, fileNameAndPath, ott_ids):
         if not os.path.exists(fileNameAndPath):
@@ -99,4 +101,4 @@ class Taxonomy:
 
         
 
-        self.tree = Tree(fileNameAndPath, format=8)
+        self.tree = Tree(fileNameAndPath, format=format_)
