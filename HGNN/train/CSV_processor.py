@@ -49,10 +49,10 @@ class CSV_processor:
             self.cleanup_csv_file()
 
         # Building the taxonomy and fixing csv if needed.
-        self.build_taxonomy()
-        if cleanup or (fine_csv_ott_header not in self.fine_csv):
-            # add ott_ids if they don't exist
-            self.fine_csv[fine_csv_ott_header] = self.fine_csv.apply(lambda row: self.tax.ott_id_dict[row[fine_csv_scientificName_header]], axis=1)
+        # self.build_taxonomy()
+        # if cleanup or (fine_csv_ott_header not in self.fine_csv):
+        #     # add ott_ids if they don't exist
+        #     self.fine_csv[fine_csv_ott_header] = self.fine_csv.apply(lambda row: self.tax.ott_id_dict[row[fine_csv_scientificName_header]], axis=1)
 
         self.save_csv_file()
 
