@@ -1,55 +1,35 @@
+import torch
 from torch import nn
 import os
-import torch
 import csv
 import time
-from scipy.stats import entropy
 import collections
 import pandas as pd
 import torchvision.models as models
-from torch.nn import Module
 from sklearn.metrics import f1_score
 import json
 from tqdm import tqdm
 import math
-from torchsummary import summary
 
-try:
-    import wandb
-except:
-    print('wandb not found')
-
+# TODO: replace with file in this repo.
 from myhelpers.earlystopping import EarlyStopping
-from myhelpers.try_warning import try_running
-from myhelpers.resnet_cifar import cifar_resnet56
-from .cifar_nin import nin_cifar100
 
 
+# Constants
 modelFinalCheckpoint = 'finalModel.pt'
 modelStartCheckpoint = 'initModel.pt'
-
 saved_models_per_iteration_folder= "iterations"
 saved_models_per_iteration_name="iteration{0}.pt"
-
 statsFileName = "stats.csv"
 adaptiveSmoothingFileName = "adaptive_smoothing.csv"
 timeFileName = "time.csv"
 epochsFileName = "epochs.csv"
-
 paramsFileName="params.json"
-
-WANDB_message="wandb not working"
-
 saved_models_per_iteration_frequency = 1
 
 
-class ZeroModule(Module):
-    def __init__(self, *args, **kwargs):
-        super(torch.nn.Identity, self).__init__()
-
-    def forward(self, input):
-        return torch.zeros_like(input)
-
+#########################
+### helpers
 class Flatten(torch.nn.Module):
     def forward(self, input):
         return input.view(input.size(0), -1)
@@ -76,6 +56,7 @@ def get_output_res(input_res, kernel_size, stride, padding):
 def get_conv(input_res, output_res, input_num_of_channels, intermediate_num_of_channels, output_num_of_channels, num_of_layers = 1, kernel_size=3, stride=1, padding=1):
     #  Sanity checks 
     assert(input_res >= output_res)
+
     needed_downsampling_layers=0
     res = input_res
     for i in range(num_of_layers):
@@ -112,103 +93,47 @@ def get_conv(input_res, output_res, input_num_of_channels, intermediate_num_of_c
 
 def create_pretrained_model(params):
     tl_model = params["tl_model"]
-    tl_freeze = False
     
-    if tl_model == "NIN":
-        model = nin_cifar100(pretrained=True)
-    elif tl_model == "CIFAR":
-        model = cifar_resnet56(pretrained='cifar100')
-    elif tl_model == "ResNet18":
+    if tl_model == "ResNet18":
         model = models.resnet18(pretrained=True)
     elif tl_model == "ResNet50":
         model = models.resnet50(pretrained=True)
     else:
         raise Exception('Unknown network type')
         
-    if tl_model != "NIN":
-        num_ftrs = model.fc.in_features
-    else:
-        num_ftrs =100
+    num_ftrs = model.fc.in_features
         
     return model, num_ftrs
-
-def create_model(architecture, params, device=None):
-    model = None
-
-    if params["modelType"] != "basic_blackbox":
-        model = CNN_Two_Nets(architecture, params, device=device)
-    else:  
-        tl_model = params["tl_model"]
-        fc_layers = params["fc_layers"]
-        
-        model, num_ftrs = create_pretrained_model(params)
-        fc = get_fc(num_ftrs, architecture["fine"], fc_layers)
-        if tl_model != "NIN":
-            model.fc = fc
-        else:
-            model.output.add_module("fc", fc)
-            
-
-    if device is not None:
-        model = model.to(device=device)
-    else:
-        print("Warning! model is on cpu")
-    return model
-
 
 # Gets a customized transfer learning model between two layers.
 # from_layer=None => from first layer. Otherwise, pass layer name
 # to_layer=None => to last layer. Otherwise, pass layer name
 # Returns [from_layer, to_layer). i.e. t_layer not included.
+# TODO: remove tl_model
 def getCustomTL_layer(tl_model, pretrained_model, from_layer=None, to_layer=None):
-    if tl_model == "NIN":
-        output = torch.nn.Sequential()
-        output.add_module("pretrained", pretrained_model)
-        output.add_module("fc", Flatten())
-        return output
-    else:
-        # if tl_model == "CIFAR":
-        #     tl_model_subLayers = [pretrained_model.conv1,
-        #       pretrained_model.bn1,
-        #       pretrained_model.relu,
-        #       pretrained_model.layer1,
-        #       pretrained_model.layer2,
-        #       pretrained_model.layer3,
-        #       pretrained_model.avgpool]
-        # else:
-            # tl_model_subLayers = [pretrained_model.conv1,
-            #   pretrained_model.bn1,
-            #   pretrained_model.relu,
-            #   pretrained_model.maxpool,
-            #   pretrained_model.layer1,
-            #   pretrained_model.layer2,
-            #   pretrained_model.layer3,
-            #   pretrained_model.layer4,
-            #   pretrained_model.avgpool]
+    # Get layers except for fc (last) one
+    tl_model_subLayer_names = list(dict(pretrained_model.named_children()).keys())[:-1]
 
-        # Get layers except for fc (last) one
-        tl_model_subLayer_names = list(dict(pretrained_model.named_children()).keys())[:-1]
+    # Get indices of from and to layers
+    from_layer_index = 0
+    to_layer_index = len(tl_model_subLayer_names)
+    if from_layer is not None:
+        try:
+            from_layer_index = tl_model_subLayer_names.index(from_layer)
+        except:
+            print(from_layer, "is not in", tl_model_subLayer_names)
+            raise
+    if to_layer is not None:
+        try:
+            to_layer_index = tl_model_subLayer_names.index(to_layer)
+        except:
+            print(to_layer, "is not in", tl_model_subLayer_names)
+            raise
 
-        # Get indices of from and to layers
-        from_layer_index = 0
-        to_layer_index = len(tl_model_subLayer_names)
-        if from_layer is not None:
-            try:
-                from_layer_index = tl_model_subLayer_names.index(from_layer)
-            except:
-                print(from_layer, "is not in", tl_model_subLayer_names)
-                raise
-        if to_layer is not None:
-            try:
-                to_layer_index = tl_model_subLayer_names.index(to_layer)
-            except:
-                print(to_layer, "is not in", tl_model_subLayer_names)
-                raise
-
-        children_layers = list(pretrained_model.children())
-        tl_model_subLayer_names_subset = tl_model_subLayer_names[from_layer_index:to_layer_index]
-        tl_model_subLayers = list(map(lambda x: children_layers[tl_model_subLayer_names.index(x)], tl_model_subLayer_names_subset))
-        return tl_model_subLayers
+    children_layers = list(pretrained_model.children())
+    tl_model_subLayer_names_subset = tl_model_subLayer_names[from_layer_index:to_layer_index]
+    tl_model_subLayers = list(map(lambda x: children_layers[tl_model_subLayer_names.index(x)], tl_model_subLayer_names_subset))
+    return tl_model_subLayers
 
 def get_layer_by_name(model, layer_name):
     model_subLayer_names = list(dict(model.named_children()).keys())[:-1]
@@ -220,10 +145,9 @@ class CNN_Two_Nets(nn.Module):
     # Contructor
     def __init__(self, architecture, params, device=None):
         modelType = params["modelType"]
-        self.noSpeciesBackprop = params["noSpeciesBackprop"]
         self.modelType = modelType
         self.numberOfFine = architecture["fine"]
-        self.numberOfCoarse = architecture["coarse"] if not modelType=="DSN" else architecture["fine"]
+        self.numberOfCoarse = architecture["coarse"]
         self.device=device
 
         if device is None:
@@ -243,32 +167,19 @@ class CNN_Two_Nets(nn.Module):
         # h_y block
         self.h_y = torch.nn.Sequential(*getCustomTL_layer(tl_model, self.network_coarse, None, link_layer)) 
 
-        # print('hy')
-        # summary(self.h_y.cuda(), (3, 32, 32))
-
         # g_c block
         self.g_c = None
-        if modelType == "HGNNgcI":
-            # TODO: fix this case. broken because we need avg pooling from h_y
-            print("HGNNgcI case not supported yet")
-            raise 
-            self.g_c = [torch.nn.Identity()]
-        elif modelType != "HGNNgc0" and modelType != "BB":
+        if modelType != "BB":
             self.g_c = getCustomTL_layer(tl_model, self.network_coarse, link_layer, None)
-        if self.g_c is not None:
             self.g_c = torch.nn.Sequential(*self.g_c, Flatten())
             self.g_c_fc = get_fc(num_ftrs_coarse, self.numberOfCoarse, num_of_layers=fc_layers)
                     
         # h_b block
         self.h_b = None
-        if modelType == "HGNNhbI":
-            # TODO: To fix this case, we need img and hy to have same dimensions 
-            print("HGNNgcI case not supported yet")
-            raise 
-            self.h_b = torch.nn.Identity()
-        elif modelType != "DISCO" and modelType != "DSN" and modelType != "BB" :
+        if modelType != "BB" :
             self.h_b = torch.nn.Sequential(*getCustomTL_layer(tl_model, self.network_fine, None, link_layer))
 
+        # TODO: rename blocks to match paper
         # h_b + h_y -> g_y
         self.cat_conv2d = None
         if self.h_b is not None:
@@ -312,7 +223,7 @@ class CNN_Two_Nets(nn.Module):
 
     def get_coarse(self, x, dataset):
         result = self(x)
-        if self.modelType!="DSN" and self.modelType!="BB" and self.modelType != "HGNNgc0":
+        if self.modelType!="BB":
             result = result['coarse']
         else:
             fineToCoarse = dataset.csv_processor.getFineToCoarseMatrix()
@@ -328,31 +239,14 @@ class CNN_Two_Nets(nn.Module):
         "coarse" : True
     }
     def activations(self, x, outputs=default_outputs):  
-        # print(x.shape)
         hy_features = self.h_y(x)
-        # print(hy_features.shape)
         
         hb_hy_features = None
         hb_features = None
         if self.h_b is not None:
-            if self.noSpeciesBackprop:
-                hy_features_feed = hy_features.detach()
-            else:
-                hy_features_feed = hy_features
-
-            hb_features = self.h_b(x)
-            if self.modelType == "HGNN":
-                hb_hy_features = torch.cat((hy_features_feed, hb_features), 1)
-                hb_hy_features =  self.cat_conv2d(hb_hy_features)
-            elif self.modelType == "HGNN_cat":
-                hb_hy_features = torch.cat((hy_features_feed, hb_features), 2)
-            else:
-                hb_hy_features = hy_features_feed + hb_features
-
+            hb_hy_features = hy_features + self.h_b(x)
         else:
             hb_hy_features = hy_features
-
-        # print('hb_hy_features', hb_hy_features.shape)
 
         yc = None
         gc_features = None
@@ -364,12 +258,9 @@ class CNN_Two_Nets(nn.Module):
         gy_features = None
         if outputs["fine"]:
             gy_features = self.g_y(hb_hy_features)
-            # print('gy_features', gy_features.shape)
-            y = self.g_y_fc(gy_features)
-            # print('y', y.shape)
-            
+            y = self.g_y_fc(gy_features)   
 
-        modelType_has_coarse = gc_features is not None and (self.modelType!="DSN")  
+        modelType_has_coarse = gc_features is not None 
 
         activations = {
             "input": x,
@@ -384,13 +275,7 @@ class CNN_Two_Nets(nn.Module):
 
         return activations
 
-def getModelFile(experimentName):
-    return os.path.join(experimentName, modelFinalCheckpoint)
-
-def getInitModelFile(experimentName):
-    return os.path.join(experimentName, modelStartCheckpoint)
-
-
+# an implementation of lambda adaptive smoothing
 def get_total_adaptive_loss(adaptive_alpha, adaptive_lambda, loss_fine, loss_coarse):
     c = -(1-adaptive_alpha)/adaptive_lambda
     c_fine = c*loss_fine
@@ -402,142 +287,61 @@ def get_total_adaptive_loss(adaptive_alpha, adaptive_lambda, loss_fine, loss_coa
     except:
         p=0
 
-    # Not stable (Nans)
-    # n_fine = torch.exp(c_fine)
-    # print(n_fine)
-    # n_coarse = torch.exp(c_coarse)
-    # print(n_coarse)
-    # p = n_fine/ (n_fine + n_coarse)
-    # print(p)
-
     lambda_fine = adaptive_alpha + (1-adaptive_alpha)*p
     lambda_coarse = (1-adaptive_alpha)*(1-p)
     return lambda_fine.detach().item(), lambda_coarse.detach().item()
 
-def f1_criterion(device):
-    return lambda pred, true : torch.reciprocal(torch.tensor(get_f1(*getPredictions(pred, true), device=device), requires_grad=True))
 
+##########################
+### public functions
 
-# ----Escort criterion
-def escort_function(x, p=2):
-    x_exp = torch.abs(x)**p
-    x_exp_sum = torch.sum(x_exp, 1, keepdim=True)
-    answer = x_exp/x_exp_sum
+# Creates the model to be trained
+def create_model(architecture, params, device=None):
+    model = CNN_Two_Nets(architecture, params, device=device)
 
-    return answer
-
-def escort_criterion(device):
-    criterion = nn.KLDivLoss()
     if device is not None:
-        criterion = criterion.cuda()
-    return lambda pred, true : criterion((escort_function(pred)+ 1e-7).log(), nn.functional.one_hot(true, num_classes=pred.shape[1]).float())
-#------
+        model = model.to(device=device)
+    else:
+        print("Warning! model is on cpu")
+    return model
 
+def getModelFile(experimentName):
+    return os.path.join(experimentName, modelFinalCheckpoint)
 
-# ----Phylogeny criterion
-class Phylogeny_KLDiv():
-    def __init__(self, distance_matrix):
-        self.distance_matrix = distance_matrix
-        self.cuda_=False
-
-    def __call__(self, pred, true):
-        # print(true[0], pred[0,:])
-        # sum_w = torch.sum(self.distance_matrix[true, :], 1).reshape(-1, 1)
-        max_w = torch.max(self.distance_matrix[true, :], 1)[0].reshape(-1, 1)
-        # w = self.distance_matrix[true, :]/ sum_w
-        # w = self.distance_matrix[true, :]/ max_w
-        w = max_w - self.distance_matrix[true, :]
-        # print('w', w[0,:])
-
-        loss = torch.nn.KLDivLoss()
-        loss2 = torch.nn.LogSoftmax(dim=1)
-        loss3 = torch.nn.Softmax(dim=1)
-        temp = loss2(pred)
-        # print('1', loss3(pred)[0, :])
-        temp2 = loss3(w)
-        # print('1_', temp2[0, :])
-
-        # Select ones that are incorrect:
-        # filter_ = (torch.max(pred, 1)[1].reshape(-1, 1) != true.reshape(-1, 1)).reshape(-1)
-        # temp = temp[filter_, :]
-        # temp2 = temp2[filter_, :]
-
-        temp = loss(temp, temp2)
-
-        # print('--')
-        # print('2', temp)
-
-        return temp
-
-    def cuda(self):
-        self.cuda_ = True
-        self.distance_matrix = self.distance_matrix.cuda()
-        return self
-#------
-
-
-
-# ----Phylogeny criterion
-class Phylogeny_MSE():
-    def __init__(self, distance_matrix, phylogeny_loss_epsilon):
-        self.criterion = nn.MSELoss()
-        self.distance_matrix = distance_matrix
-        self.epsilon = phylogeny_loss_epsilon
-
-    def __call__(self, pred, true):
-        # get d[true, :]
-        d = self.distance_matrix[true, :] + self.epsilon
-
-        # get inv
-        inv_d = 1/d
-
-        # get MSE
-        return self.criterion(inv_d, pred)   
-
-    def cuda(self):
-        self.criterion = self.criterion.cuda()
-        self.distance_matrix = self.distance_matrix.cuda()
-        return self
-#------
-
+def getInitModelFile(experimentName):
+    return os.path.join(experimentName, modelStartCheckpoint)
 
 def trainModel(train_loader, validation_loader, params, model, savedModelName, test_loader=None, device=None, detailed_reporting=False):  
     n_epochs = 500
     patience = 5
     learning_rate = params["learning_rate"]
     modelType = params["modelType"]
-    unsupervisedOnTest = params["unsupervisedOnTest"]
     lambda_coarse = params["lambda"]
     lambda_fine = 1
-    use_phylogeny_loss = params["phylogeny_loss"]
-    phylogeny_loss_epsilon = params["phylogeny_loss_epsilon"]
-
-    if trainModel is None:
-        print("training model on CPU!")
-    
-    adaptive_smoothing_enabled = params["adaptive_smoothing"]
-    adaptive_lambda = None if not adaptive_smoothing_enabled else params["adaptive_lambda"]
-    adaptive_alpha = None if not adaptive_smoothing_enabled else params["adaptive_alpha"]
-    if adaptive_smoothing_enabled:
-        df_adaptive_smoothing = pd.DataFrame()
-
     weight_decay = 0.0001
-    isOldBlackbox = (modelType == "basic_blackbox")
-    isBlackbox = (modelType == "BB")
-    isDSN = (modelType == "DSN")
 
-    assert ((use_phylogeny_loss==False) or isBlackbox), "Coarse loss and phylogeny tree are not simultaneously supported." 
-    
     df = pd.DataFrame()
-    
+
+    if device is None:
+        print("training model on CPU!")
     if not os.path.exists(savedModelName):
         os.makedirs(savedModelName)
-
     saved_models_per_iteration = os.path.join(savedModelName, saved_models_per_iteration_folder)
     if not os.path.exists(saved_models_per_iteration):
         os.makedirs(saved_models_per_iteration)
 
+    
+    # Adaptive smoothing
+    adaptive_smoothing_enabled = params["adaptive_smoothing"]
+    adaptive_lambda = None if not adaptive_smoothing_enabled else params["adaptive_lambda"]
+    adaptive_alpha = None if not adaptive_smoothing_enabled else params["adaptive_alpha"]
+    if adaptive_smoothing_enabled and detailed_reporting:
+        df_adaptive_smoothing = pd.DataFrame()
+
     optimizer = torch.optim.Adam(model.parameters(), lr = learning_rate, weight_decay=weight_decay)
+    criterion = nn.CrossEntropyLoss()
+    if device is not None:
+        criterion = criterion.cuda()
     
     # early stopping
     early_stopping = EarlyStopping(path=savedModelName, patience=patience)
@@ -545,21 +349,10 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     print("Training started...")
     start = time.time()
 
-    if not use_phylogeny_loss:
-        criterion = nn.CrossEntropyLoss()
-        # criterion = f1_criterion(device)
-        # criterion = escort_criterion(device)
-    elif use_phylogeny_loss=="MSE":
-        criterion = Phylogeny_MSE(train_loader.dataset.csv_processor.distance_matrix, phylogeny_loss_epsilon)
-    else:
-        criterion = Phylogeny_KLDiv(train_loader.dataset.csv_processor.distance_matrix)
-
-    if device is not None:
-        criterion = criterion.cuda()
-
     with tqdm(total=n_epochs, desc="iteration") as bar:
         epochs = 0
         for epoch in range(n_epochs):
+
             model.train()
             for i, batch in enumerate(train_loader):
                 absolute_batch = i + epoch*len(train_loader)
@@ -573,79 +366,58 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                 with torch.set_grad_enabled(True):
                     z = applyModel(batch["image"], model)
                     
-                    if not isOldBlackbox:
-                        loss_coarse = 0
-                        if z["coarse"] is not None:
-                            loss_coarse = criterion(z["coarse"], batch["coarse"] if not isDSN else batch["fine"])
-                        loss_fine = criterion(z["fine"], batch["fine"])
+                    loss_coarse = 0
+                    if z["coarse"] is not None:
+                        loss_coarse = criterion(z["coarse"], batch["coarse"])
+                    loss_fine = criterion(z["fine"], batch["fine"])
 
-                        adaptive_info = {
-                            'batch': absolute_batch,
-                            'epoch': epoch,
-                            'loss_fine': loss_fine.item() if torch.is_tensor(loss_fine) else loss_fine,
-                            'loss_coarse': loss_coarse.item() if torch.is_tensor(loss_coarse) else loss_coarse,
-                            'lambda_fine': lambda_fine,
-                            'lambda_coarse': lambda_coarse,
-                        }
-                        if adaptive_smoothing_enabled and z["coarse"] is not None and not isDSN :
-                            # lambda_fine, lambda_coarse = get_total_adaptive_loss(adaptive_alpha, adaptive_lambda, loss_fine, loss_coarse)
-                            lambda_fine, lambda_coarse = get_total_adaptive_loss(adaptive_alpha, adaptive_lambda, 
-                                loss_fine/len(train_loader.dataset.csv_processor.getFineList()), 
-                                loss_coarse/len(train_loader.dataset.csv_processor.getCoarseList()))
-                            adaptive_info['lambda_fine']= lambda_fine
-                            adaptive_info['lambda_coarse']= lambda_coarse
+                    adaptive_info = {
+                        'batch': absolute_batch,
+                        'epoch': epoch,
+                        'loss_fine': loss_fine.item() if torch.is_tensor(loss_fine) else loss_fine,
+                        'loss_coarse': loss_coarse.item() if torch.is_tensor(loss_coarse) else loss_coarse,
+                        'lambda_fine': lambda_fine,
+                        'lambda_coarse': lambda_coarse,
+                    }
+                    if adaptive_smoothing_enabled and z["coarse"] is not None:
+                        # lambda_fine, lambda_coarse = get_total_adaptive_loss(adaptive_alpha, adaptive_lambda, loss_fine, loss_coarse)
+                        lambda_fine, lambda_coarse = get_total_adaptive_loss(adaptive_alpha, adaptive_lambda, 
+                            loss_fine/len(train_loader.dataset.csv_processor.getFineList()), 
+                            loss_coarse/len(train_loader.dataset.csv_processor.getCoarseList()))
+                        adaptive_info['lambda_fine']= lambda_fine
+                        adaptive_info['lambda_coarse']= lambda_coarse
+                        if detailed_reporting:
                             df_adaptive_smoothing = df_adaptive_smoothing.append(pd.DataFrame(adaptive_info, index=[0]), ignore_index = True) 
 
-                        loss = lambda_fine*loss_fine + lambda_coarse*loss_coarse
-                        loss.backward()
-                        wandb_dic = {"loss": loss.item()}
-                        wandb_dic = {**wandb_dic, **adaptive_info} 
-                        try_running(lambda : wandb.log(wandb_dic), WANDB_message)
-                    else:    
-                        loss_fine = criterion(z, batch["fine"])
-                        loss_fine.backward()
-                        try_running(lambda : wandb.log({"loss": loss_fine, "batch": absolute_batch}, step=epoch), WANDB_message)
+                    loss = lambda_fine*loss_fine + lambda_coarse*loss_coarse
+                    loss.backward()
+
                     optimizer.step()
-            if unsupervisedOnTest and test_loader and not isOldBlackbox:
-                for i, batch in enumerate(test_loader):
-
-                    if device is not None:
-                        batch["image"] = batch["image"].cuda()
-                        batch["fine"] = batch["fine"].cuda()
-                        batch["coarse"] = batch["coarse"].cuda()
-
-                    optimizer.zero_grad()
-                    with torch.set_grad_enabled(True):
-                        z = applyModel(batch["image"], model)
-
-                        loss_unsupervised = criterion(z["coarse"], batch["coarse"])
-                        loss_unsupervised.backward()
-                        optimizer.step()
             
             model.eval()
 
-            getCoarse = not isOldBlackbox and not isDSN and not isBlackbox
+            getCoarse = (modelType != "BB")
             
+            # Get statistics
             predlist_val, lbllist_val = getLoaderPredictionProbabilities(validation_loader, model, params, device=device)
             validation_loss = getCrossEntropy(predlist_val, lbllist_val)
             predlist_val, lbllist_val = getPredictions(predlist_val, lbllist_val)
             validation_fine_f1 = get_f1(predlist_val, lbllist_val, device=device)
 
-            if not isDSN:
+            if getCoarse:
                 predlist_val, lbllist_val = getLoaderPredictionProbabilities(validation_loader, model, params, 'coarse', device=device)
-                if getCoarse:
-                    validation_coarse_loss = getCrossEntropy(predlist_val, lbllist_val)
-                    predlist_val, lbllist_val = getPredictions(predlist_val, lbllist_val)
-                    validation_coarse_f1 = get_f1(predlist_val, lbllist_val, device=device)
+                validation_coarse_loss = getCrossEntropy(predlist_val, lbllist_val)
+                predlist_val, lbllist_val = getPredictions(predlist_val, lbllist_val)
+                validation_coarse_f1 = get_f1(predlist_val, lbllist_val, device=device)
 
             predlist_train, lbllist_train = getLoaderPredictionProbabilities(train_loader, model, params, device=device)
             training_loss = getCrossEntropy(predlist_train, lbllist_train)
             predlist_train, lbllist_train = getPredictions(predlist_train, lbllist_train)
             train_fine_f1 = get_f1(predlist_train, lbllist_train, device=device)
 
-            if detailed_reporting and not isDSN:
-                predlist_train, lbllist_train = getLoaderPredictionProbabilities(train_loader, model, params, 'coarse', device=device)
+            if detailed_reporting:
                 if getCoarse:
+                    predlist_train, lbllist_train = getLoaderPredictionProbabilities(train_loader, model, params, 'coarse', device=device)
                     training_coarse_loss = getCrossEntropy(predlist_train, lbllist_train)
                     predlist_train, lbllist_train = getPredictions(predlist_train, lbllist_train)
                     training_coarse_f1 = get_f1(predlist_train, lbllist_train, device=device)
@@ -654,10 +426,10 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                 predlist_test, lbllist_test = getLoaderPredictionProbabilities(test_loader, model, params, device=device)
                 predlist_test, lbllist_test = getPredictions(predlist_test, lbllist_test)
                 test_fine_f1 = get_f1(predlist_test, lbllist_test, device=device)
-                if not isDSN:
-                    predlist_test, lbllist_test = getLoaderPredictionProbabilities(test_loader, model, params, 'coarse', device=device)
-                    predlist_test, lbllist_test = getPredictions(predlist_test, lbllist_test)
-                    test_coarse_f1 = get_f1(predlist_test, lbllist_test, device=device)
+                
+                predlist_test, lbllist_test = getLoaderPredictionProbabilities(test_loader, model, params, 'coarse', device=device)
+                predlist_test, lbllist_test = getPredictions(predlist_test, lbllist_test)
+                test_coarse_f1 = get_f1(predlist_test, lbllist_test, device=device)
 
             row_information = {
                 'epoch': epoch,
@@ -669,13 +441,12 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
 
                 'training_coarse_loss': training_coarse_loss if getCoarse and detailed_reporting else None,
                 'validation_coarse_loss': validation_coarse_loss if getCoarse and detailed_reporting else None,
-                'training_coarse_f1':  training_coarse_f1 if getCoarse and not isDSN and detailed_reporting else None,
-                'validation_coarse_f1': validation_coarse_f1 if getCoarse and not isDSN and detailed_reporting else None,
-                'test_coarse_f1': test_coarse_f1 if test_loader and not isDSN and detailed_reporting else None,
+                'training_coarse_f1':  training_coarse_f1 if getCoarse and detailed_reporting else None,
+                'validation_coarse_f1': validation_coarse_f1 if getCoarse and detailed_reporting else None,
+                'test_coarse_f1': test_coarse_f1 if test_loader and detailed_reporting else None,
             }
             
             df = df.append(pd.DataFrame(row_information, index=[0]), ignore_index = True)
-            try_running(lambda : wandb.log(row_information), WANDB_message)
             
             # Update the bar
             bar.set_postfix(val=row_information["validation_fine_f1"], 
@@ -736,14 +507,6 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
             f = open(os.path.join(savedModelName, paramsFileName),"w")        
             f.write(j)
             f.close() 
-
-
-        wandb.run.summary["validation_fine_f1"] = -1/early_stopping.best_score 
-
-        predlist_test, lbllist_test = getLoaderPredictionProbabilities(test_loader, model, params, device=device)
-        predlist_test, lbllist_test = getPredictions(predlist_test, lbllist_test)
-        test_fine_f1 = get_f1(predlist_test, lbllist_test, device=device)
-        wandb.run.summary["test_fine_f1"] = test_fine_f1
     
     return df, epochs, time_elapsed
 
@@ -771,6 +534,9 @@ def loadModel(model, savedModelName, device=None):
         
     return df, epochs, time_elapsed
 
+
+
+
 def top_k_acc(output, target, topk=(1,2,3,4,5)):
     maxk = max(topk)
     batch_size = target.size(0)
@@ -785,7 +551,6 @@ def top_k_acc(output, target, topk=(1,2,3,4,5)):
         res.append(correct_k.mul_(100.0 / batch_size))
     return res
 
-
 # Returns the mean of CORRECT probability of all predictions. If high, it means the model is sure about its predictions
 # Takes probabilities
 def getAvgProbCorrectGuess(predlist, lbllist):
@@ -793,11 +558,6 @@ def getAvgProbCorrectGuess(predlist, lbllist):
     predlist = predlist.gather(1, lbllist)
     max_predlist = predlist.mean().item()
     return max_predlist
-
-# # Returns the mean of best probability of all predictions. If low, it means the model is sure about its predictions
-# def getAvgEntropyFromLoader(loader, model, params, label="fine"):
-#     predlist, _ = getLoaderPredictionProbabilities(loader, model, params, label)
-#     return torch.Tensor(entropy(predlist.cpu().T, base=2)).mean().item()
 
 # Takes probabilities
 def getCrossEntropy(predlist, lbllist):
@@ -860,68 +620,8 @@ def get_f1(predlist, lbllist, device=None):
         lbllist = lbllist.cpu()   
     return f1_score(lbllist, predlist, average='macro')
 
-# Returns the distance between examples in terms of classification cross entropy
-# Augmentation should be disabled
-#TODO: remove this when get_distance_from_example2 works
-def get_distance_from_example(dataset, example_1, model, params, device=None):
-    isOldBlackbox = (params['modelType'] == "basic_blackbox")
-    criterion = torch.nn.CosineSimilarity()
-    dataset_size = len(dataset)
-    result = torch.zeros(1, dataset_size)
-
-    with torch.set_grad_enabled(False):
-        img = example_1["image"]
-        if device is not None:
-           img=img.cuda() 
-        img=img.unsqueeze(0)
-        z_1 = applyModel(img, model)
-        if not isOldBlackbox:
-            z_1 = z_1['fine']
-        z_1 = z_1.detach()
-        z_1 = torch.nn.Softmax(dim=1)(z_1)
-        for j in range(dataset_size):
-            example_2 = dataset[j]
-            img = example_2["image"]
-            if device is not None:
-                img=img.cuda() 
-            img=img.unsqueeze(0)
-            z_2 = applyModel(img, model)
-
-            if not isOldBlackbox:
-                z_2 = z_2['fine']
-
-            z_2 = z_2.detach()
-            z_2 = torch.nn.Softmax(dim=1)(z_2)
-
-            loss = criterion(z_1, z_2)
-
-
-            result[0, j] = loss
-    return result
-
-def get_distance_from_example2(dataset_predProblist, example_1_predProb):
-    criterion = torch.nn.CosineSimilarity()
-    dataset_size = dataset_predProblist.shape[0]
-    result = torch.zeros(1, dataset_size)
-
-    with torch.set_grad_enabled(False):
-        z_1 = example_1_predProb.reshape((1, example_1_predProb.shape[0]))
-        z_1 = torch.nn.Softmax(dim=1)(z_1)
-        for j in range(dataset_size):
-            example_2_predProb = dataset_predProblist[j, :]
-
-            z_2 = example_2_predProb.reshape((1, example_2_predProb.shape[0]))
-            z_2 = torch.nn.Softmax(dim=1)(z_2)
-
-            loss = criterion(z_1, z_2)
-
-            result[0, j] = loss
-    return result
-
 def applyModel(batch, model):
-#     if torch.cuda.is_available():
-#         model_dist = torch.nn.DataParallel(model, device_ids=range(torch.cuda.device_count()))
-#         outputs = model_dist(batch)
-#     else:
+#   model_dist = torch.nn.DataParallel(model, device_ids=range(torch.cuda.device_count()))
+#   outputs = model_dist(batch)
     outputs = model(batch)
     return outputs
