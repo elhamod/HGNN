@@ -7,9 +7,15 @@ import copy
 import pandas as pd
 import pickle
 import math
-    
-#TODO: All experiments wit datasplit params having augmented should have it removed.
-# This is because being augmented should have same split if it is not augmented.
+
+
+# Constants
+experimetnsFileName = "experiments.csv"
+paramsFileName="params.json"
+configJsonFileName = "params.json"
+
+######################
+### helpers
 def getDatasetParams(params):
     result = {
         "image_path": params["image_path"],
@@ -32,34 +38,10 @@ def getModelName(params, trial_id=None):
     
     return os.path.join('models',modelName)
 
-experimetnsFileName = "experiments.csv"
-paramsFileName="params.json"
+#########################
+### Public methods
 
-def getExperimentParamsAndRecord(experimentsPath, experimentName, trial_hash) :
-    experimentsFileNameAndPath = os.path.join(experimentsPath, experimetnsFileName)
-    if os.path.exists(experimentsFileNameAndPath):
-        experiments_df = pd.read_csv(experimentsFileNameAndPath)
-        experimentRecord = experiments_df[experiments_df["trialHash"] == trial_hash]
-        experimentRecord = experimentRecord[experimentRecord["experimentName"] == experimentName]
-        # experiment_params = experimentRecord.to_dict('records')[0]
-
-        modelName = experimentRecord.iloc[0]["modelName"]
-        experimentNameAndPath = os.path.join(experimentsPath, experimentName)
-        modelNameAndPath = os.path.join(experimentNameAndPath, modelName)
-        fullFileName = os.path.join(modelNameAndPath, paramsFileName)
-        with open(fullFileName, 'rb') as f:
-            experiment_params = json.loads(f.read())
-        return experiment_params, experimentRecord
-    else:
-        raise Exception("Experiment not " + trial_hash + " found!")
-
-
-
-
-
-configJsonFileName = "params.json"
-configPickleFileName = "params.pkl"
-
+# The config parser is a helper object for creating experiments
 class ConfigParser:
     def __init__(self, experimentsPath, dataPath, experimentName):
         self.experimentName = experimentName
@@ -68,54 +50,29 @@ class ConfigParser:
         self.dataPath = dataPath
         self.base_params = None
             
-    def write(self, base_params, params, experiment_type):
+    def write(self, base_params, params):
         self.base_params = base_params
-        fileName = configJsonFileName if experiment_type != "Random" else configPickleFileName
         
-        fullFileName = os.path.join(self.experimentNameAndPath, fileName)
+        fullFileName = os.path.join(self.experimentNameAndPath, configJsonFileName)
         if os.path.exists(self.experimentName) and os.path.exists(fullFileName):
             self.experimentName = self.experimentName+"-"+hex(int(time.time()))  
             self.experimentNameAndPath = os.path.join(self.experimentsPath, self.experimentName)
-        fullFileName = os.path.join(self.experimentNameAndPath, fileName)
+        fullFileName = os.path.join(self.experimentNameAndPath, configJsonFileName)
         
         if not os.path.exists(self.experimentNameAndPath):
             os.makedirs(self.experimentNameAndPath)
 
-
+        # create experiment params
         experimentList = []
-        if experiment_type=="Grid":
-            keys, values = zip(*params.items())
-            # create experiment params
-            for v in itertools.product(*values):
-                experiment_params = dict(zip(keys, v))
-                experimentList.append({**self.base_params, **experiment_params})
-                
-        elif experiment_type=="Random":
-            for key in self.base_params:
-                if key not in params:
-                    params[key] = hp.choice(key, [self.base_params[key]])
-                    
-        elif experiment_type=="Select":
-            # create experiment params
-            for expriment in params:
-                experimentList.append({**self.base_params, **expriment})
-                
-        else:
-            raise Exception('Unknown experiment type') 
+        for expriment in params:
+            experimentList.append({**self.base_params, **expriment})
  
-        
-    
-    
-        if experiment_type=="Select" or experiment_type=="Grid":
-            j = json.dumps({"experimentList": experimentList})
-            f = open(fullFileName,"w")        
-            f.write(j)
-            f.close()           
-        else:
-            j = params
-            with open(fullFileName, 'wb') as f:
-                pickle.dump(params, f)
-        
+        # Write them
+        j = json.dumps({"experimentList": experimentList})
+        f = open(fullFileName,"w")        
+        f.write(j)
+        f.close()           
+
         return fullFileName
 
     def getExperiments(self, fixExperiments=True):
@@ -125,17 +82,6 @@ class ConfigParser:
                 experimentList = list(map(lambda x: self.fixExperimentParams(x) if fixExperiments else x , json.loads(f.read())["experimentList"]))
 
             return iter(experimentList)
-        else:
-            raise Exception('Error loading experiment parameters for ' + fullFileName) 
-    
-    # For hyper param search, fixExperimentParams needs to be called outside. TODO: fix that requirement
-    def getHyperoptSearchObject(self):
-        fullFileName = os.path.join(self.experimentNameAndPath, configPickleFileName)
-        if os.path.exists(fullFileName):   
-            with open(fullFileName, 'rb') as f:
-                hyperp_search_params = pickle.load(f)
-
-            return hyperp_search_params
         else:
             raise Exception('Error loading experiment parameters for ' + fullFileName) 
     
@@ -162,10 +108,7 @@ class ConfigParser:
         params["adaptive_smoothing"] = params["adaptive_smoothing"] if check_valid(params,"adaptive_smoothing") else False
         params["adaptive_lambda"] = params["adaptive_lambda"] if check_valid(params,"adaptive_lambda") else 0.1
         params["adaptive_alpha"] = params["adaptive_alpha"] if check_valid(params,"adaptive_alpha") else 0.9
-        params["noSpeciesBackprop"] = params["noSpeciesBackprop"] if check_valid(params,"noSpeciesBackprop") else False
-        params["phylogeny_loss"] = params["phylogeny_loss"] if check_valid(params,"phylogeny_loss") else False
-        params["phylogeny_loss_epsilon"] = params["phylogeny_loss_epsilon"] if check_valid(params,"phylogeny_loss_epsilon") else 0.03
-        
+
         return params
 
 def check_valid(params, key):

@@ -1,25 +1,19 @@
-import os, glob
+import os
 import torch
 import pandas as pd
-from PIL import Image
-from tqdm import tqdm
-import time
-from .taxonomy import Taxonomy
 
 
 
+#### Constants
 # metadata file provided by dataset.
 fine_csv_fileName = "metadata.csv"
 # cleaned up metadata file that has no duplicates, invalids...etc
 cleaned_fine_csv_fileName = "cleaned_metadata.csv"
 cleaned_fine_tree_fileName = "cleaned_metadata.tre"
-
 # Saved file names.
 statistic_countPerFine="count_per_fine.csv"
 statistic_countPerFamilyAndGenis="count_per_family_genus.csv"
-
 # metadata table headers.
-fine_csv_ott_header = 'ott_id'
 fine_csv_fileName_header = "fileName"
 fine_csv_scientificName_header = "scientificName"
 fine_csv_Coarse_header = "Genus"
@@ -28,9 +22,10 @@ fine_csv_usedColumns = [fine_csv_fileName_header,
                           fine_csv_scientificName_header,
                           fine_csv_Coarse_header,
                           fine_csv_Family_header]
-
 # subpath of where images can be found.
 image_subpath = "images"
+
+
 
 # Loads, processes, cleans up and analyise fish metadata
 class CSV_processor:
@@ -40,19 +35,9 @@ class CSV_processor:
         self.image_subpath = image_subpath
         self.fine_csv = None
 
-        # taxa related
-        self.tax = None
-        self.distance_matrix = None
-
         self.get_csv_file()
         if cleanup:
             self.cleanup_csv_file()
-
-        # Building the taxonomy and fixing csv if needed.
-        # self.build_taxonomy()
-        # if cleanup or (fine_csv_ott_header not in self.fine_csv):
-        #     # add ott_ids if they don't exist
-        #     self.fine_csv[fine_csv_ott_header] = self.fine_csv.apply(lambda row: self.tax.ott_id_dict[row[fine_csv_scientificName_header]], axis=1)
 
         self.save_csv_file()
 
@@ -124,49 +109,15 @@ class CSV_processor:
         self.fine_csv = self.fine_csv[mask]
 
         print(self.fine_csv)
-        # self.fine_csv = self.fine_csv[self.fine_csv.index.isin(fileNames)]
-
-    def build_taxonomy(self):
-        df_nodupes = self.fine_csv[fine_csv_scientificName_header].drop_duplicates() # Will probably need more processing to deal with small letter...etc
-        node_ids = df_nodupes.tolist()
-
-        cleaned_fine_tree_fileName_full_path = os.path.join(self.data_root, self.suffix, cleaned_fine_tree_fileName)
-        self.tax = Taxonomy(node_ids, cleaned_fine_tree_fileName_full_path, verbose=False)
-
-        # build distance matrix for efficiency
-        fineList = self.getFineList()
-
-        self.distance_matrix = torch.zeros(len(fineList), len(fineList))
-        for i, species_i in enumerate(fineList):
-            for j, species_j in enumerate(fineList):
-                self.distance_matrix[i, j] = self.tax.get_distance(species_i, species_j)
 
 
 
-
-
-
+#####################
+#### helpers
 
 # exmaple: FFFFffFF.JPG -> FFFFffFF_
 def get_fileName_prefix(txt):
     return os.path.splitext(txt)[0]+"_"
-
-
-
-
-
-
-# The following two functions should be changed together!!!
-
-
-# Gets if csv_value is (exact or as prefix) in list 
-# dir_lst is a tabbed string of concatenated values
-# def filter(csv_value, dir_lst):
-#     csv_in_dir = (str.upper(csv_value) in dir_lst)
-#     if not csv_in_dir:
-#         csv_prefix_in_dir = get_fileName_prefix(str.upper(csv_value)) in dir_lst
-#         return csv_prefix_in_dir
-#     return csv_in_dir
 
 # Find an equivalent to the filename in the list by checking exact and prefix matches.
 # This is used to get the name with same case as in the list (usually in directory)
