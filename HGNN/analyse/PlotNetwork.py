@@ -1,5 +1,4 @@
 import matplotlib.pylab as plt
-import math
 import os
 import torch
 import numpy as np
@@ -27,7 +26,6 @@ def plot_activations(model, layer_name, input_img, experimentName, params, datas
     if torch.cuda.is_available():
         input_img = input_img.to('cuda')
     
-    title = fileName.replace('_', '\_')
     activation = model_activations(model, layer_name, dataset)
     A = activation(input_img)
     if (layer_name == "coarse" or layer_name == "fine"):
@@ -45,7 +43,7 @@ def plot_activations(model, layer_name, input_img, experimentName, params, datas
     A_split = np.array_split(A, n_splits)
 
     thresh = A.max() / 1.5
-    fig, axes = plt.subplots(n_splits, 1, figsize=(25, 1.5*n_splits), dpi= 300)
+    _, axes = plt.subplots(n_splits, 1, figsize=(25, 1.5*n_splits), dpi= 300)
     idx = 0
     for j, A_single in enumerate(A_split):
         ax = axes[j] if n_splits >1 else axes

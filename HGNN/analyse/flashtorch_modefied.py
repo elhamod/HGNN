@@ -1,4 +1,4 @@
-import warnings
+# This code is based on https://github.com/MisaOgura/flashtorch
 
 import torch
 import torch.nn as nn
@@ -47,8 +47,7 @@ class CNN_wrapper(torch.nn.Module):
     
 #################################################
     
-from flashtorch.utils import (denormalize,
-                              format_for_plotting,
+from flashtorch.utils import (format_for_plotting,
                               standardize_and_clip)
     
 

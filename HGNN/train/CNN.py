@@ -11,8 +11,7 @@ import json
 from tqdm import tqdm
 import math
 
-# TODO: replace with file in this repo.
-from myhelpers.earlystopping import EarlyStopping
+from earlystopping import EarlyStopping
 
 
 # Constants
@@ -93,11 +92,13 @@ def get_conv(input_res, output_res, input_num_of_channels, intermediate_num_of_c
 
 def create_pretrained_model(params):
     tl_model = params["tl_model"]
+    pretrained = params["pretrained"]
+    
     
     if tl_model == "ResNet18":
-        model = models.resnet18(pretrained=True)
+        model = models.resnet18(pretrained=pretrained)
     elif tl_model == "ResNet50":
-        model = models.resnet50(pretrained=True)
+        model = models.resnet50(pretrained=pretrained)
     else:
         raise Exception('Unknown network type')
         
@@ -109,8 +110,7 @@ def create_pretrained_model(params):
 # from_layer=None => from first layer. Otherwise, pass layer name
 # to_layer=None => to last layer. Otherwise, pass layer name
 # Returns [from_layer, to_layer). i.e. t_layer not included.
-# TODO: remove tl_model
-def getCustomTL_layer(tl_model, pretrained_model, from_layer=None, to_layer=None):
+def getCustomTL_layer(pretrained_model, from_layer=None, to_layer=None):
     # Get layers except for fc (last) one
     tl_model_subLayer_names = list(dict(pretrained_model.named_children()).keys())[:-1]
 
@@ -153,7 +153,6 @@ class CNN_Two_Nets(nn.Module):
         if device is None:
             print("Creating model on cpu!")
 
-        tl_model = params["tl_model"]
         link_layer = params["link_layer"]
         fc_layers = params["fc_layers"]
         img_res = params["img_res"]
@@ -164,52 +163,51 @@ class CNN_Two_Nets(nn.Module):
         self.network_coarse, num_ftrs_coarse = create_pretrained_model(params)
         self.network_fine, num_ftrs_fine = create_pretrained_model(params)
         
-        # h_y block
-        self.h_y = torch.nn.Sequential(*getCustomTL_layer(tl_model, self.network_coarse, None, link_layer)) 
+        # h_genus block
+        self.h_genus = torch.nn.Sequential(*getCustomTL_layer(self.network_coarse, None, link_layer)) 
 
-        # g_c block
-        self.g_c = None
+        # g_genus block
+        self.g_genus = None
         if modelType != "BB":
-            self.g_c = getCustomTL_layer(tl_model, self.network_coarse, link_layer, None)
-            self.g_c = torch.nn.Sequential(*self.g_c, Flatten())
-            self.g_c_fc = get_fc(num_ftrs_coarse, self.numberOfCoarse, num_of_layers=fc_layers)
+            self.g_genus = getCustomTL_layer(self.network_coarse, link_layer, None)
+            self.g_genus = torch.nn.Sequential(*self.g_genus, Flatten())
+            self.g_genus_fc = get_fc(num_ftrs_coarse, self.numberOfCoarse, num_of_layers=fc_layers)
                     
-        # h_b block
-        self.h_b = None
+        # h_species block
+        self.h_species = None
         if modelType != "BB" :
-            self.h_b = torch.nn.Sequential(*getCustomTL_layer(tl_model, self.network_fine, None, link_layer))
+            self.h_species = torch.nn.Sequential(*getCustomTL_layer(self.network_fine, None, link_layer))
 
-        # TODO: rename blocks to match paper
-        # h_b + h_y -> g_y
+        # h_species + h_genus -> g_species
         self.cat_conv2d = None
-        if self.h_b is not None:
+        if self.h_species is not None:
             if modelType == "HGNN":
                 # concatenate hb and hy features and then cut the number of channels by 2
-                hb_features = self.h_b(torch.rand(1, 3, img_res, img_res))
-                hy_features = self.h_y(torch.rand(1, 3, img_res, img_res))
-                assert(hy_features.shape == hb_features.shape), "hb and hy activations should be of same size" 
-                assert(hb_features.shape[2] == hb_features.shape[3]), "hb/hy should be square-shaped"
-                hb_hy_features = torch.cat((hy_features, hb_features), 1)
-                resolution = hb_features.shape[2]
-                in_channels = hb_hy_features.shape[1]
+                h_species_features = self.h_species(torch.rand(1, 3, img_res, img_res))
+                h_genus_features = self.h_genus(torch.rand(1, 3, img_res, img_res))
+                assert(h_genus_features.shape == h_species_features.shape), "hb and hy activations should be of same size" 
+                assert(h_species_features.shape[2] == h_species_features.shape[3]), "hb/hy should be square-shaped"
+                h_species_and_genus_features = torch.cat((h_genus_features, h_species_features), 1)
+                resolution = h_species_features.shape[2]
+                in_channels = h_species_and_genus_features.shape[1]
                 self.cat_conv2d = get_conv(resolution, resolution, in_channels, in_channels, int(in_channels/2))
                 if self.device is not None:
                     self.cat_conv2d = self.cat_conv2d.cuda()
 
-        # g_y block
-        self.g_y = torch.nn.Sequential(*getCustomTL_layer(tl_model, self.network_fine, link_layer, None),  
+        # g_species block
+        self.g_species = torch.nn.Sequential(*getCustomTL_layer(self.network_fine, link_layer, None),  
                                        Flatten())
-        self.g_y_fc = get_fc(num_ftrs_fine, self.numberOfFine, num_of_layers=fc_layers)
+        self.g_species_fc = get_fc(num_ftrs_fine, self.numberOfFine, num_of_layers=fc_layers)
 
         if device is not None:
-            self.g_y = self.g_y.cuda()
-            self.h_y = self.h_y.cuda()
-            self.g_y_fc = self.g_y_fc.cuda()
-            if self.g_c is not None:
-                self.g_c = self.g_c.cuda()
-                self.g_c_fc = self.g_c_fc.cuda()
-            if self.h_b is not None:
-                self.h_b = self.h_b.cuda()
+            self.g_species = self.g_species.cuda()
+            self.h_genus = self.h_genus.cuda()
+            self.g_species_fc = self.g_species_fc.cuda()
+            if self.g_genus is not None:
+                self.g_genus = self.g_genus.cuda()
+                self.g_genus_fc = self.g_genus_fc.cuda()
+            if self.h_species is not None:
+                self.h_species = self.h_species.cuda()
     
     # Prediction
     def forward(self, x):
@@ -239,37 +237,37 @@ class CNN_Two_Nets(nn.Module):
         "coarse" : True
     }
     def activations(self, x, outputs=default_outputs):  
-        hy_features = self.h_y(x)
+        h_genus_features = self.h_genus(x)
         
-        hb_hy_features = None
-        hb_features = None
-        if self.h_b is not None:
-            hb_hy_features = hy_features + self.h_b(x)
+        h_species_and_genus_features = None
+        h_species_features = None
+        if self.h_species is not None:
+            h_species_and_genus_features = h_genus_features + self.h_species(x)
         else:
-            hb_hy_features = hy_features
+            h_species_and_genus_features = h_genus_features
 
-        yc = None
-        gc_features = None
-        if outputs["coarse"] and self.g_c is not None:
-            gc_features = self.g_c(hy_features)
-            yc = self.g_c_fc(gc_features)
+        y_genus = None
+        g_genus_features = None
+        if outputs["coarse"] and self.g_genus is not None:
+            g_genus_features = self.g_genus(h_genus_features)
+            y_genus = self.g_genus_fc(g_genus_features)
         
         y = None
-        gy_features = None
+        g_species_features = None
         if outputs["fine"]:
-            gy_features = self.g_y(hb_hy_features)
-            y = self.g_y_fc(gy_features)   
+            g_species_features = self.g_species(h_species_and_genus_features)
+            y = self.g_species_fc(g_species_features)   
 
-        modelType_has_coarse = gc_features is not None 
+        modelType_has_coarse = g_genus_features is not None 
 
         activations = {
             "input": x,
-            "hy_features": hy_features,
-            "hb_features": hb_features,
-            "hb_hy_features": hb_hy_features,
-            "gy_features": gy_features if outputs["fine"] else None,
-            "gc_features": gc_features if outputs["coarse"] else None,
-            "coarse": yc if outputs["coarse"] and modelType_has_coarse else None,
+            "h_genus_features": h_genus_features,
+            "h_species_features": h_species_features,
+            "h_species_and_genus_features": h_species_and_genus_features,
+            "g_species_features": g_species_features if outputs["fine"] else None,
+            "g_genus_features": g_genus_features if outputs["coarse"] else None,
+            "coarse": y_genus if outputs["coarse"] and modelType_has_coarse else None,
             "fine": y if outputs["fine"] else None
         }
 
@@ -312,7 +310,7 @@ def getInitModelFile(experimentName):
     return os.path.join(experimentName, modelStartCheckpoint)
 
 def trainModel(train_loader, validation_loader, params, model, savedModelName, test_loader=None, device=None, detailed_reporting=False):  
-    n_epochs = 500
+    n_epochs = 4 #TODO: change this back to 500
     patience = 5
     learning_rate = params["learning_rate"]
     modelType = params["modelType"]

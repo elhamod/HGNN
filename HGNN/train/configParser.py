@@ -1,17 +1,13 @@
 import time
 import json
 import os
-import itertools
 import hashlib
 import copy
 import pandas as pd
-import pickle
 import math
 
 
 # Constants
-experimetnsFileName = "experiments.csv"
-paramsFileName="params.json"
 configJsonFileName = "params.json"
 
 ######################

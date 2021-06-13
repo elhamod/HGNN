@@ -5,11 +5,10 @@ from torchvision import transforms
 import torchvision
 import re
 
-from myhelpers.dataset_normalization import dataset_normalization
-from myhelpers.color_PCA import Color_PCA
-
-from .configParser import getDatasetName
-from .CSV_processor import CSV_processor
+from dataset_normalization import dataset_normalization
+from color_PCA import Color_PCA
+from configParser import getDatasetName
+from CSV_processor import CSV_processor
 
 
 
