@@ -101,19 +101,6 @@ class ConfigParser:
         params["adaptive_alpha"] = params["adaptive_alpha"] if check_valid(params,"adaptive_alpha") else 0.9
         params["pretrained"] = params["pretrained"] if check_valid(params,"pretrained") else True
 
-        # TODO: delete me
-        # if params["modelType"]=="HGNN_add":
-        #     params["modelType"]="HGNN"
-        # if params["image_path"]=="Curated4/Medium":
-        #     params["image_path"]="Hard"
-        # elif params["image_path"]=="Curated4/Easy_100":
-        #     params["image_path"]="Easy_100"
-        # elif params["image_path"]=="Curated4/Easy_50":
-        #     params["image_path"]="Easy_50"
-        # if params["image_path"]=="Hard":
-        #     params["image_path"]="Hard/curated_30_50"
-        # params.pop('suffix', None)
-
         return params
 
 def check_valid(params, key):

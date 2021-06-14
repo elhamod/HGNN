@@ -297,7 +297,7 @@ def getInitModelFile(experimentName):
     return os.path.join(experimentName, modelStartCheckpoint)
 
 def trainModel(train_loader, validation_loader, params, model, savedModelName, test_loader=None, device=None, detailed_reporting=False):  
-    n_epochs = 4 #TODO: change this back to 500
+    n_epochs = 500
     patience = 5
     learning_rate = params["learning_rate"]
     modelType = params["modelType"]

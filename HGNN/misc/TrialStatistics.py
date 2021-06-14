@@ -252,20 +252,8 @@ class TrialStatistics:
         display(HTML(df.to_html()))
         if saveHTML:
             pivot_ui(df,outfile_path=os.path.join(self.experiment_name, name_html))
-            
-    def getStatistic(self, trial_params, metric, statistic):
-        if self.agg_df.empty:
-            self.aggregateTrials()
-        trial_params_copy = self.preProcessParameters(trial_params)
-        row = self.agg_df.loc[self.agg_df['experimentHash'] == getTrialName(trial_params_copy)]
-        return row[self.trial_results_keys][(metric, statistic)].item()
-    
-    
-    
-    
 
-        
-    # prints aggregate confusion matrix for trials    
+  # prints aggregate confusion matrix for trials    
     def printTrialConfusionMatrix(self, trial_params, lst, printOutput=False):
         aggregatePath = os.path.join(self.experiment_name, getTrialName(trial_params))
         if not os.path.exists(aggregatePath):
@@ -289,7 +277,7 @@ class TrialStatistics:
                                   aggregatePath,
                                   file_name,
                                   printOutput)
-    
+
     def aggregateTrialConfusionMatrices(self):
         for hash_key in self.confusionMatrices:
             confusionMatricesForHash = self.confusionMatrices[hash_key]
@@ -305,7 +293,7 @@ class TrialStatistics:
         # save confusion matric
         return self.save_load_matrix(confusionMatrixFileName_csv, trial_params)
     
-
+ 
     
     
     def pandasBoxplot(self, columns, bys, saveFig=True, figsize=(16, 7), color='r'):
@@ -318,9 +306,8 @@ class TrialStatistics:
             if not os.path.exists(self.experiment_name):
                 os.makedirs(self.experiment_name)
             fig.savefig(os.path.join(self.experiment_name,name+ ".pdf"), bbox_inches='tight')
-    
 
-    def printF1table(self, trial_params, dataset):
+def printF1table(self, trial_params, dataset):
         cm = self.getTrialConfusionMatrix(trial_params)
 
         if self.prefix == "coarse":
@@ -365,43 +352,6 @@ class TrialStatistics:
             file_name = file_name + "_coarse"
         df.to_csv(os.path.join(self.experiment_name, file_name+".csv"))  
     
-    
-    
-    def trialScatter(self, x, y, aggregatedBy=None, save_plot=False):
-        df = self.df
-            
-        file_name = 'plot ' + y + " to " +  x + ((' by ' + str(aggregatedBy)) if aggregatedBy is not None else '')
-                 
-        
-        # get unique values for aggregate by
-        uniqueValues=['all']
-        if aggregatedBy is not None:
-            uniqueValues=df[aggregatedBy].unique()       
-
-        # prepare axis
-        fig, ax=plt.subplots()
-        plt.tight_layout()
-        ax.set_xlabel(x)
-        ax.set_ylabel(y)
-        
-                     
-        for val in uniqueValues:
-            if aggregatedBy:
-                x_values = df.loc[df[aggregatedBy] == val][x].values
-                y_values = df.loc[df[aggregatedBy] == val][y].values    
-            else:
-                x_values = df[x].values
-                y_values = df[y].values
-
-            im = ax.scatter(x=x_values,
-                          y=y_values,
-                          label=val)
-            ax.legend()
-            
-        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-        if save_plot:
-            fig.savefig(os.path.join(self.experiment_name, file_name+".pdf"))
-
     
     def preProcessParameters(self, trial_params):
         trial_params_copy = {**trial_params, **{}}
