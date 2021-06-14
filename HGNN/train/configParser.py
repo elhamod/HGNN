@@ -19,12 +19,6 @@ def getDatasetParams(params):
     }
     return result
     
-def getDatasetName(params):
-    datasetName = str(getDatasetParams(params))
-    datasetName = hashlib.sha224(datasetName.encode('utf-8')).hexdigest()
-    
-    return os.path.join('datasplits',datasetName)
-    
 def getModelName(params, trial_id=None):    
     modelName = str(params)
     if trial_id is not None:
@@ -75,7 +69,8 @@ class ConfigParser:
         fullFileName = os.path.join(self.experimentNameAndPath, configJsonFileName)
         if os.path.exists(fullFileName):
             with open(fullFileName, 'rb') as f:
-                experimentList = list(map(lambda x: self.fixExperimentParams(x) if fixExperiments else x , json.loads(f.read())["experimentList"]))
+                exp_list = json.loads(f.read())["experimentList"]
+                experimentList = list(map(lambda x: self.fixExperimentParams(x) if fixExperiments else x , exp_list))
 
             return iter(experimentList)
         else:
@@ -104,6 +99,20 @@ class ConfigParser:
         params["adaptive_smoothing"] = params["adaptive_smoothing"] if check_valid(params,"adaptive_smoothing") else False
         params["adaptive_lambda"] = params["adaptive_lambda"] if check_valid(params,"adaptive_lambda") else 0.1
         params["adaptive_alpha"] = params["adaptive_alpha"] if check_valid(params,"adaptive_alpha") else 0.9
+        params["pretrained"] = params["pretrained"] if check_valid(params,"pretrained") else True
+
+        # TODO: delete me
+        # if params["modelType"]=="HGNN_add":
+        #     params["modelType"]="HGNN"
+        # if params["image_path"]=="Curated4/Medium":
+        #     params["image_path"]="Hard"
+        # elif params["image_path"]=="Curated4/Easy_100":
+        #     params["image_path"]="Easy_100"
+        # elif params["image_path"]=="Curated4/Easy_50":
+        #     params["image_path"]="Easy_50"
+        # if params["image_path"]=="Hard":
+        #     params["image_path"]="Hard/curated_30_50"
+        # params.pop('suffix', None)
 
         return params
 

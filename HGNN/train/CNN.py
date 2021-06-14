@@ -164,50 +164,37 @@ class CNN_Two_Nets(nn.Module):
         self.network_fine, num_ftrs_fine = create_pretrained_model(params)
         
         # h_genus block
-        self.h_genus = torch.nn.Sequential(*getCustomTL_layer(self.network_coarse, None, link_layer)) 
+        self.h_y = torch.nn.Sequential(*getCustomTL_layer(self.network_coarse, None, link_layer)) 
 
         # g_genus block
-        self.g_genus = None
+        self.g_c = None
         if modelType != "BB":
-            self.g_genus = getCustomTL_layer(self.network_coarse, link_layer, None)
-            self.g_genus = torch.nn.Sequential(*self.g_genus, Flatten())
-            self.g_genus_fc = get_fc(num_ftrs_coarse, self.numberOfCoarse, num_of_layers=fc_layers)
+            self.g_c = getCustomTL_layer(self.network_coarse, link_layer, None)
+            self.g_c = torch.nn.Sequential(*self.g_c, Flatten())
+            self.g_c_fc = get_fc(num_ftrs_coarse, self.numberOfCoarse, num_of_layers=fc_layers)
                     
         # h_species block
-        self.h_species = None
+        self.h_b = None
         if modelType != "BB" :
-            self.h_species = torch.nn.Sequential(*getCustomTL_layer(self.network_fine, None, link_layer))
+            self.h_b = torch.nn.Sequential(*getCustomTL_layer(self.network_fine, None, link_layer))
 
         # h_species + h_genus -> g_species
         self.cat_conv2d = None
-        if self.h_species is not None:
-            if modelType == "HGNN":
-                # concatenate hb and hy features and then cut the number of channels by 2
-                h_species_features = self.h_species(torch.rand(1, 3, img_res, img_res))
-                h_genus_features = self.h_genus(torch.rand(1, 3, img_res, img_res))
-                assert(h_genus_features.shape == h_species_features.shape), "hb and hy activations should be of same size" 
-                assert(h_species_features.shape[2] == h_species_features.shape[3]), "hb/hy should be square-shaped"
-                h_species_and_genus_features = torch.cat((h_genus_features, h_species_features), 1)
-                resolution = h_species_features.shape[2]
-                in_channels = h_species_and_genus_features.shape[1]
-                self.cat_conv2d = get_conv(resolution, resolution, in_channels, in_channels, int(in_channels/2))
-                if self.device is not None:
-                    self.cat_conv2d = self.cat_conv2d.cuda()
 
         # g_species block
-        self.g_species = torch.nn.Sequential(*getCustomTL_layer(self.network_fine, link_layer, None),  
+        self.g_y = torch.nn.Sequential(*getCustomTL_layer(self.network_fine, link_layer, None),  
                                        Flatten())
-        self.g_species_fc = get_fc(num_ftrs_fine, self.numberOfFine, num_of_layers=fc_layers)
+        self.g_y_fc = get_fc(num_ftrs_fine, self.numberOfFine, num_of_layers=fc_layers)
 
         if device is not None:
-            self.g_species = self.g_species.cuda()
-            self.h_genus = self.h_genus.cuda()
-            self.g_species_fc = self.g_species_fc.cuda()
-            if self.g_genus is not None:
-                self.g_genus = self.g_genus.cuda()
-                self.g_genus_fc = self.g_genus_fc.cuda()
-            if self.h_species is not None:
-                self.h_species = self.h_species.cuda()
+            self.g_y = self.g_y.cuda()
+            self.h_y = self.h_y.cuda()
+            self.g_y_fc = self.g_y_fc.cuda()
+            if self.g_c is not None:
+                self.g_c = self.g_c.cuda()
+                self.g_c_fc = self.g_c_fc.cuda()
+            if self.h_b is not None:
+                self.h_b = self.h_b.cuda()
     
     # Prediction
     def forward(self, x):
@@ -237,36 +224,36 @@ class CNN_Two_Nets(nn.Module):
         "coarse" : True
     }
     def activations(self, x, outputs=default_outputs):  
-        h_genus_features = self.h_genus(x)
+        h_y_features = self.h_y(x)
         
-        h_species_and_genus_features = None
-        h_species_features = None
-        if self.h_species is not None:
-            h_species_and_genus_features = h_genus_features + self.h_species(x)
+        h_b_and_y_features = None
+        h_b_features = None
+        if self.h_b is not None:
+            h_b_and_y_features = h_y_features + self.h_b(x)
         else:
-            h_species_and_genus_features = h_genus_features
+            h_b_and_y_features = h_y_features
 
         y_genus = None
-        g_genus_features = None
-        if outputs["coarse"] and self.g_genus is not None:
-            g_genus_features = self.g_genus(h_genus_features)
-            y_genus = self.g_genus_fc(g_genus_features)
+        g_c_features = None
+        if outputs["coarse"] and self.g_c is not None:
+            g_c_features = self.g_c(h_y_features)
+            y_genus = self.g_c_fc(g_c_features)
         
         y = None
-        g_species_features = None
+        g_y_features = None
         if outputs["fine"]:
-            g_species_features = self.g_species(h_species_and_genus_features)
-            y = self.g_species_fc(g_species_features)   
+            g_y_features = self.g_y(h_b_and_y_features)
+            y = self.g_y_fc(g_y_features)   
 
-        modelType_has_coarse = g_genus_features is not None 
+        modelType_has_coarse = g_c_features is not None 
 
         activations = {
             "input": x,
-            "h_genus_features": h_genus_features,
-            "h_species_features": h_species_features,
-            "h_species_and_genus_features": h_species_and_genus_features,
-            "g_species_features": g_species_features if outputs["fine"] else None,
-            "g_genus_features": g_genus_features if outputs["coarse"] else None,
+            "h_genus_features": h_y_features,
+            "h_species_features": h_b_features,
+            "h_species_and_genus_features": h_b_and_y_features,
+            "g_species_features": g_y_features if outputs["fine"] else None,
+            "g_genus_features": g_c_features if outputs["coarse"] else None,
             "coarse": y_genus if outputs["coarse"] and modelType_has_coarse else None,
             "fine": y if outputs["fine"] else None
         }

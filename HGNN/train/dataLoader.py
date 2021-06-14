@@ -7,7 +7,6 @@ import re
 
 from dataset_normalization import dataset_normalization
 from color_PCA import Color_PCA
-from configParser import getDatasetName
 from CSV_processor import CSV_processor
 
 
@@ -178,13 +177,9 @@ class datasetManager:
     def updateParams(self, params):
         self.params = params
 
-        datasetName = getDatasetName(params)
-        if datasetName != self.datasetName:
-            self.datasetName = datasetName
-            self.data_root, self.suffix = getParams(params)
-            self.experiment_folder_name = os.path.join(self.data_root, self.suffix, self.experimentName)
-            self.dataset_folder_name = os.path.join(self.experiment_folder_name, datasetName)
-            self.reset()
+        self.data_root, self.suffix = getParams(params)
+        self.experiment_folder_name = os.path.join(self.data_root, self.suffix, self.experimentName)
+        self.reset()
         
     def getDataset(self):
         if self.dataset_train is None:
