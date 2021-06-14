@@ -1,9 +1,13 @@
 This repo is for Fish classification.
 
-To start:
-- You will need to clone https://github.com/elhamod/myhelpers to your machine
-- Have your data with metadata.csv in a directory.
-- Create a config file using HGNN/train/ConfigParserWriter-*
-- train a model using train.py. e.g.: python3 train.py --name="learningRateTest" --experiments="/home/elhamod/HGNN/experiments/" --data="/data/BGNN_data"
-- analyze the data using jupyter notebooks under HGNN/analyse/ .e.g Analyze trial, Analyze experiments.
-- Once trained and analyzed, an experiment folder with name <experiments>/<name> will have been created, with a "models" folder that has all the trained model, a "results" folder with the analysis, and a "datasplits" folder with the indexes of images used for train/val/test.
+To train:
+- Have your data with metadata.csv in a directory. A sample file can be found in this repo. Your image data needs to be in the torchvision ImageFolder format, with train/val/test subfolders.
+- Create a config file using HGNN/train/ConfigParserWriter-SelectExperiments.ipynb
+- train a model using HGNN/train/train.ipynb.
+
+  
+To view results:
+- analyze the data using jupyter notebooks HGNN/analyse/Analyze experiments.ipynb.
+- Once trained and analyzed, an experiment folder with name <experiments>/<name> will have been created, with a "models" folder that has all the trained model, a "results" folder with the analysis.
+- You can also look at HGNN/analyse/Analyze multiple experiments-*.ipynb for seeing the results in our MEE paper
+- To see Saliency map results, you can look at HGNN/analyse/Saliency Maps - *.ipynb files. 
