@@ -1,33 +1,21 @@
 import os
 from torch.utils.data import Dataset
-import numpy as np
 import torch
 from torchvision import transforms
-from tqdm import tqdm
-import random
 import torchvision
 import re
 
-from myhelpers.dataset_normalization import dataset_normalization
-from myhelpers.color_PCA import Color_PCA
-
-from .configParser import getDatasetName
-from .CSV_processor import CSV_processor
+from dataset_normalization import dataset_normalization
+from color_PCA import Color_PCA
+from CSV_processor import CSV_processor
 
 
 
 num_of_workers = 8
 
-IMG_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tiff', '.webp')
-
-def is_valid_file_no_augmentation(path):
-    fileName = os.path.basename(path)
-    # A file is not valid if it has "XXXX_aug_n.XXX", where n is not 0
-    isValid = ("_aug_0." in fileName) or not ("_aug_" in fileName)
-    return isValid
-
+# This object is used as an interface for dataset, normalization, augmentation, and csv_processor.
 class FishDataset(Dataset):
-    def __init__(self, type_, params, data_path, normalizer, color_pca, csv_processor, verbose=False):
+    def __init__(self, type_, params, normalizer, color_pca, csv_processor):
         self.imageDimension = params["img_res"] # if None, CSV_processor will load original images
         self.n_channels = 3
         self.data_root, self.suffix  = getParams(params)
@@ -40,8 +28,8 @@ class FishDataset(Dataset):
         data_root_suffix = os.path.join(self.data_root, self.suffix, type_)
         if not os.path.exists(data_root_suffix):
             os.makedirs(data_root_suffix)
-        # Only valid files are the non-augmented ones 
-        self.dataset = torchvision.datasets.ImageFolder(data_root_suffix, is_valid_file=is_valid_file_no_augmentation, transform=transforms.Compose(self.getTransforms()), target_transform=None)
+
+        self.dataset = torchvision.datasets.ImageFolder(data_root_suffix, transform=transforms.Compose(self.getTransforms()), target_transform=None)
         self.mapFileNameToIndex = {} # This dictionary will make it easy to find the information of an image by its file name.
         if normalizer is not None:
             self.normalizer = normalizer
@@ -58,14 +46,15 @@ class FishDataset(Dataset):
         self.augmentation_enabled = params["augmented"]
         self.normalization_enabled = True
        
-        
         if csv_processor is None:
             self.csv_processor = CSV_processor(self.data_root, self.suffix)
         else:
             self.csv_processor = csv_processor
 
+
+
     def getTransforms(self):
-        transformsList = [#transforms.ToPILImage(),
+        transformsList = [
             transforms.Lambda(self.MakeSquared)]
 
         if self.augmentation_enabled:
@@ -137,7 +126,6 @@ class FishDataset(Dataset):
         image = image.type(torch.FloatTensor)
         fileName_full = self.dataset.samples[idx][0]
         fileName = os.path.basename(fileName_full)
-        fileName = re.sub(r'_{}_aug_\d+'.format(self.imageDimension), '', fileName)
 
         if fileName not in self.mapFileNameToIndex.keys():
             self.mapFileNameToIndex[fileName] = idx
@@ -147,7 +135,6 @@ class FishDataset(Dataset):
         assert(target == img_fine_index), f"label in dataset is not the same as file name in csv, {fileName}, in dataset={target}, in csv={img_fine_index}"
         img_fine_index = torch.tensor(img_fine_index)
 
-#         matchFamily = self.csv_processor.samples[idx]['family']
         matchcoarse = self.csv_processor.getCoarseLabel(fileName)
         matchcoarse_index = torch.tensor(self.csv_processor.getCoarseList().index(matchcoarse))
 
@@ -162,7 +149,12 @@ def getParams(params):
     data_root = params["image_path"]
     suffix = str(params["suffix"]) if ("suffix" in params and params["suffix"] is not None) else ""    
     return data_root, suffix
-    
+
+
+################################
+#### Public class
+
+# This class provides the necessary dataloaders for the experiments
 class datasetManager:
     def __init__(self, experimentName, data_path, verbose=False):
         self.verbose = verbose
@@ -171,7 +163,6 @@ class datasetManager:
         self.experimentName = experimentName
         self.datasetName = None
         self.params = None
-        self.data_path = data_path
         self.reset()
     
     def reset(self):
@@ -186,20 +177,16 @@ class datasetManager:
     def updateParams(self, params):
         self.params = params
 
-        datasetName = getDatasetName(params)
-        if datasetName != self.datasetName:
-            self.datasetName = datasetName
-            self.data_root, self.suffix = getParams(params)
-            self.experiment_folder_name = os.path.join(self.data_root, self.suffix, self.experimentName)
-            self.dataset_folder_name = os.path.join(self.experiment_folder_name, datasetName)
-            self.reset()
+        self.data_root, self.suffix = getParams(params)
+        self.experiment_folder_name = os.path.join(self.data_root, self.suffix, self.experimentName)
+        self.reset()
         
     def getDataset(self):
         if self.dataset_train is None:
             print("Creating datasets...")
-            self.dataset_train = FishDataset("train", self.params, self.data_path, None, None, None, self.verbose)
-            self.dataset_val = FishDataset("val", self.params, self.data_path, self.dataset_train.normalizer, self.dataset_train.color_pca, self.dataset_train.csv_processor, self.verbose)
-            self.dataset_test = FishDataset("test", self.params, self.data_path, self.dataset_train.normalizer, self.dataset_train.color_pca, self.dataset_train.csv_processor, self.verbose)
+            self.dataset_train = FishDataset("train", self.params,  None, None, None)
+            self.dataset_val = FishDataset("val", self.params, self.dataset_train.normalizer, self.dataset_train.color_pca, self.dataset_train.csv_processor)
+            self.dataset_test = FishDataset("test", self.params, self.dataset_train.normalizer, self.dataset_train.color_pca, self.dataset_train.csv_processor)
             print("Creating datasets... Done.")
         return self.dataset_train, self.dataset_val, self.dataset_test
 

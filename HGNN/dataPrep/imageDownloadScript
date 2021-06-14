@@ -1,6 +1,0 @@
-﻿#!/bin/bash
-image-scraper -s /raid/elhamod/Fish/INHS_cropped/images2 http://www.tubri.org/HDR/INHS/
-
-# in image-scraper utils.py, I had to replace page.text with page.content
-
-

@@ -53,6 +53,13 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# No copies
+*-Copy*
+*-copy*
+
+# Some unimportant files
+*-ipynb_checkpoint*
+
 # Translations
 *.mo
 *.pot
