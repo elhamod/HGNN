@@ -1,7 +1,7 @@
 This repo is for Fish classification.
 
 To train:
-- Have your data with metadata.csv in a directory. A sample file can be found in HGNN_repo_artifacts.zip. Your image data needs to be in the torchvision ImageFolder format, with train/val/test subfolders.
+- Have your data with metadata.csv in a directory. A sample file can be found in HGNN/analyse/HGNN_repo_artifacts.zip. Your image data needs to be in the torchvision ImageFolder format, with train/val/test subfolders.
 - Create a config file using HGNN/train/ConfigParserWriter-SelectExperiments.ipynb
 - train a model using HGNN/train/train.ipynb.
 
