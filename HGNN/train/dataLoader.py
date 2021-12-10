@@ -1,3 +1,5 @@
+# kfold reference: https://datascience.stackexchange.com/questions/49571/can-we-use-k-fold-cross-validation-without-any-extra-excluded-test-set 
+
 import os
 from torch.utils.data import Dataset
 import numpy as np
@@ -7,9 +9,12 @@ from tqdm import tqdm
 import random
 import torchvision
 import re
+from sklearn.model_selection import StratifiedKFold
 
 from myhelpers.dataset_normalization import dataset_normalization
 from myhelpers.color_PCA import Color_PCA
+from myhelpers.seeding import get_seed_from_trialNumber
+from myhelpers.read_write import Pickle_reader_writer
 
 from .configParser import getDatasetName
 from .CSV_processor import CSV_processor
@@ -17,7 +22,7 @@ from .CSV_processor import CSV_processor
 
 
 num_of_workers = 8
-
+kf_splits_FILENAME = "kf_splits.pkl"
 IMG_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tiff', '.webp')
 
 def is_valid_file_no_augmentation(path):
@@ -25,6 +30,15 @@ def is_valid_file_no_augmentation(path):
     # A file is not valid if it has "XXXX_aug_n.XXX", where n is not 0
     isValid = ("_aug_0." in fileName) or not ("_aug_" in fileName)
     return isValid
+
+
+SHUFFLE=False # no need to shuffle the batches every epoch
+DROPLAST = False # False is not good for randomness, but True (dropping examples) might hurt performance!
+
+def _init_fn(worker_id):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 class FishDataset(Dataset):
     def __init__(self, type_, params, data_path, normalizer, color_pca, csv_processor, verbose=False):
@@ -36,6 +50,8 @@ class FishDataset(Dataset):
         self.pad = False
         self.normalizer = None
         self.composedTransforms = None   
+        self.grayscale = params["grayscale"]
+        self.random_fitting = params["random_fitting"]
         
         data_root_suffix = os.path.join(self.data_root, self.suffix, type_)
         if not os.path.exists(data_root_suffix):
@@ -53,7 +69,7 @@ class FishDataset(Dataset):
         if color_pca is not None:
             self.color_pca = color_pca
         else: 
-            self.color_pca = Color_PCA(data_root_suffix, torch.utils.data.DataLoader(self.dataset, batch_size=128), 1.5)
+            self.color_pca = Color_PCA(data_root_suffix, torch.utils.data.DataLoader(self.dataset, batch_size=128, num_workers=num_of_workers, drop_last=DROPLAST, worker_init_fn=_init_fn), 1.5)
 
         self.augmentation_enabled = params["augmented"]
         self.normalization_enabled = True
@@ -70,8 +86,11 @@ class FishDataset(Dataset):
 
         if self.augmentation_enabled:
             transformsList + [transforms.RandomHorizontalFlip(p=0.3),
-            transforms.RandomAffine(degrees=60, translate=(0.25, 0.25), fillcolor=self.RGBmean)]
+            transforms.RandomAffine(degrees=60, translate=(0.25, 0.25), fill=self.RGBmean)]
         
+        if self.grayscale:
+            transformsList = transformsList + [transforms.Grayscale(num_output_channels=1)]
+
         transformsList = transformsList + [transforms.ToTensor()]
 
         if self.augmentation_enabled:
@@ -152,7 +171,7 @@ class FishDataset(Dataset):
         matchcoarse_index = torch.tensor(self.csv_processor.getCoarseList().index(matchcoarse))
 
         return {'image': image, 
-                'fine': img_fine_index, 
+                'fine': img_fine_index if not self.random_fitting else hash(fileName_full)%len(self.csv_processor.getFineList()), 
                 'fileName': fileName,
                 'fileNameFull': fileName_full,
                 'coarse': matchcoarse_index,} 
@@ -195,28 +214,89 @@ class datasetManager:
             self.reset()
         
     def getDataset(self):
+        useCrossValidation = self.params["useCrossValidation"]
         if self.dataset_train is None:
             print("Creating datasets...")
             self.dataset_train = FishDataset("train", self.params, self.data_path, None, None, None, self.verbose)
-            self.dataset_val = FishDataset("val", self.params, self.data_path, self.dataset_train.normalizer, self.dataset_train.color_pca, self.dataset_train.csv_processor, self.verbose)
+
+            # if useCrossValidation and "val" folder exists, "train" and "val" will be joined
+            # if useCrossValidation and "val" does not folder exists, "train" will be used
+            # if not useCrossValidation and "val" folder exists, use "train" and "val" separately
+            # if not useCrossValidation and "val" folder does not exist, raise an error!
+            self.dataset_val = None
+            try:
+                self.dataset_val = FishDataset("val", self.params, self.data_path, self.dataset_train.normalizer, self.dataset_train.color_pca, self.dataset_train.csv_processor, self.verbose)
+            except:
+                if not useCrossValidation:
+                    print("Either cross-validation need to be enabled or a 'val' DatasetFolder needs to exist")
+                    raise
+            
             self.dataset_test = FishDataset("test", self.params, self.data_path, self.dataset_train.normalizer, self.dataset_train.color_pca, self.dataset_train.csv_processor, self.verbose)
             print("Creating datasets... Done.")
         return self.dataset_train, self.dataset_val, self.dataset_test
 
     # Creates the train/val/test dataloaders out of the dataset 
-    def getLoaders(self):
+    def getLoaders(self, trial_num=None):
         batchSize = self.params["batchSize"]
+        useCrossValidation = self.params["useCrossValidation"]
+        n_splits = self.params["numOfTrials"]
+
+        SEED_INT = get_seed_from_trialNumber(trial_num)
 
         if self.dataset_train is None:
             self.getDataset()
 
+            if useCrossValidation:
+                # Try to load saved kf_splits. If they don't exist, generate them
+                split_filepath = os.path.join(self.data_root, self.suffix)
+                split_filename = str(n_splits) + "_" + kf_splits_FILENAME
+                read_writer = Pickle_reader_writer(split_filepath, split_filename)
+                self.kf_splits = read_writer.readFile()
+
+                targets = self.dataset_train.dataset.targets
+                if self.dataset_val is not None:
+                    self.dataset_train = torch.utils.data.ConcatDataset([self.dataset_train,self.dataset_val])
+                    self.dataset_train.csv_processor = self.dataset_val.csv_processor
+                    targets = targets + self.dataset_train.datasets[1].dataset.targets
+
+                if self.kf_splits is None:
+                    self.kf_splits = StratifiedKFold(n_splits=n_splits, random_state=SEED_INT).split(self.dataset_train, targets)
+                    self.kf_splits = [(train_index, val_index) for train_index, val_index in self.kf_splits]
+
+                    # Save the splits
+                    read_writer.writeFile(self.kf_splits)
+            
         # create data loaders.
         print("Creating loaders...")
-        self.train_loader = torch.utils.data.DataLoader(self.dataset_train, pin_memory=True, shuffle=True, batch_size=batchSize, num_workers=num_of_workers)
-        self.validation_loader = torch.utils.data.DataLoader(self.dataset_val, pin_memory=True, shuffle=True, batch_size=batchSize, num_workers=num_of_workers)
-        self.validation_loader.dataset.toggle_image_loading(augmentation=False, normalization=self.dataset_val.normalization_enabled)
-        self.test_loader = torch.utils.data.DataLoader(self.dataset_test, pin_memory=True, shuffle=True, batch_size=batchSize, num_workers=num_of_workers)
+        train_generator = torch.Generator()
+        train_generator.manual_seed(SEED_INT)
+        val_generator = torch.Generator()
+        val_generator.manual_seed(SEED_INT)
+        # train_generator = None
+        # val_generator = None
+        if not useCrossValidation:
+            self.train_loader = torch.utils.data.DataLoader(self.dataset_train, pin_memory=True, generator=train_generator, shuffle=SHUFFLE, batch_size=batchSize, num_workers=num_of_workers, drop_last=DROPLAST, worker_init_fn=_init_fn)
+            self.validation_loader = torch.utils.data.DataLoader(self.dataset_val, pin_memory=True, generator=val_generator, shuffle=SHUFFLE, batch_size=batchSize, num_workers=num_of_workers, drop_last=DROPLAST, worker_init_fn=_init_fn)
+        elif trial_num is not None:
+            # train_index, val_index = next(self.kf_splits)
+            (train_index, val_index) = self.kf_splits[trial_num]
+            # print(trial_num, train_index, val_index, len(train_index), len(val_index))
+            train_subsampler = torch.utils.data.SubsetRandomSampler(train_index) #SubsetRandomSampler
+            val_subsampler = torch.utils.data.SubsetRandomSampler(val_index) # SubsetRandomSampler
+            self.train_loader = torch.utils.data.DataLoader(self.dataset_train, pin_memory=True, generator=train_generator, sampler=train_subsampler, batch_size=batchSize, num_workers=num_of_workers, drop_last=DROPLAST, worker_init_fn=_init_fn)
+            self.validation_loader = torch.utils.data.DataLoader(self.dataset_train, pin_memory=True, generator=val_generator, sampler=val_subsampler, batch_size=batchSize, num_workers=num_of_workers, drop_last=DROPLAST, worker_init_fn=_init_fn)
+        else:
+            print("getLoaders with useCrossValidation should specify a fold (trial_num) number!")
+            raise
+        
+        # TODO: Had to remove this because with crossvalidation .dataset has a different meaning.
+        # It is OK for now but it changes behavior.
+        # self.validation_loader.dataset.toggle_image_loading(augmentation=False, normalization=self.dataset_val.normalization_enabled)
+        
+        test_generator = torch.Generator()
+        test_generator.manual_seed(SEED_INT)
+        self.test_loader = torch.utils.data.DataLoader(self.dataset_test, pin_memory=True, generator=test_generator, shuffle=SHUFFLE, batch_size=batchSize, num_workers=num_of_workers, drop_last=DROPLAST, worker_init_fn=_init_fn)
         self.test_loader.dataset.toggle_image_loading(augmentation=False, normalization=self.dataset_test.normalization_enabled) # Needed so we always get the same prediction accuracy 
         print("Creating loaders... Done.")
-        
+
         return self.train_loader, self.validation_loader, self.test_loader

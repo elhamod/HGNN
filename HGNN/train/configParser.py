@@ -181,6 +181,12 @@ class ConfigParser:
         params["triplet_layers_dic"] = params["triplet_layers_dic"] if check_valid(params,"triplet_layers_dic") else 'layer2,layer4'
         params["two_phase_lambda"] = params["two_phase_lambda"] if check_valid(params,"two_phase_lambda") else False
         params["L1reg"] = params["L1reg"] if check_valid(params,"L1reg") else False
+        params["grayscale"] = params["grayscale"] if check_valid(params,"grayscale") else False
+        params["tl_extralayer"] = params["tl_extralayer"] if check_valid(params,"tl_extralayer") else False
+        params["random_fitting"] = params["random_fitting"] if check_valid(params,"random_fitting") else False
+        params["useCrossValidation"] = params["useCrossValidation"] if check_valid(params,"useCrossValidation") else False
+        params["phyloDistances"] = params["phyloDistances"] if check_valid(params,"phyloDistances") else "0.75,0.5,0.25"
+        params["addKernelOrthogonality"] = params["addKernelOrthogonality"] if check_valid(params,"addKernelOrthogonality") else False
 
         return params
 

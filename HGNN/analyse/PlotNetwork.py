@@ -19,8 +19,15 @@ class model_activations(torch.nn.Module):
         if self.layer_name == 'coarse':
             return self.model.get_coarse(x, self.dataset)
         else:
-            activations = self.model.activations
-            return activations(x)[self.layer_name]
+            try:
+                activations = self.model.activations
+                return activations(x)[self.layer_name]
+            except:
+                self.model(x)
+                try:
+                    return self.model.getModule(self.layer_name)
+                except:
+                    return self.model.get_module(self.layer_name)
     
 # Define the function for plotting the activations
 def plot_activations(model, layer_name, input_img, experimentName, params, dataset, fileName="", n_splits=1, topA=5):

@@ -10,8 +10,6 @@ from .taxonomy import Taxonomy
 
 # metadata file provided by dataset.
 fine_csv_fileName = "metadata.csv"
-# cleaned up metadata file that has no duplicates, invalids...etc
-cleaned_fine_csv_fileName = "cleaned_metadata.csv"
 cleaned_fine_tree_fileName = "cleaned_metadata.tre"
 
 # Saved file names.
@@ -34,11 +32,12 @@ image_subpath = "images"
 
 # Loads, processes, cleans up and analyise fish metadata
 class CSV_processor:
-    def __init__(self, data_root, suffix, cleanup=False, verbose=False):
+    def __init__(self, data_root, suffix, cleanup=False, verbose=False, cleaned_fine_csv_fileName = "cleaned_metadata.csv", build_taxonomy=True):
         self.data_root = data_root
         self.suffix = suffix
         self.image_subpath = image_subpath
         self.fine_csv = None
+        self.cleaned_fine_csv_fileName = cleaned_fine_csv_fileName
 
         # taxa related
         self.tax = None
@@ -49,10 +48,11 @@ class CSV_processor:
             self.cleanup_csv_file()
 
         # Building the taxonomy and fixing csv if needed.
-        self.build_taxonomy()
-        if cleanup or (fine_csv_ott_header not in self.fine_csv):
-            # add ott_ids if they don't exist
-            self.fine_csv[fine_csv_ott_header] = self.fine_csv.apply(lambda row: self.tax.ott_id_dict[row[fine_csv_scientificName_header]], axis=1)
+        if build_taxonomy:
+            self.build_taxonomy()
+            if cleanup or (fine_csv_ott_header not in self.fine_csv):
+                # add ott_ids if they don't exist
+                self.fine_csv[fine_csv_ott_header] = self.fine_csv.apply(lambda row: self.tax.ott_id_dict[row[fine_csv_scientificName_header]], axis=1)
 
         self.save_csv_file()
 
@@ -82,7 +82,7 @@ class CSV_processor:
         return fineToCoarseMatrix
     
     def save_csv_file(self):
-        cleaned_fine_csv_fileName_full_path = os.path.join(self.data_root, self.suffix, cleaned_fine_csv_fileName)
+        cleaned_fine_csv_fileName_full_path = os.path.join(self.data_root, self.suffix, self.cleaned_fine_csv_fileName)
         # clean up the csv file from unfound images
         if not os.path.exists(cleaned_fine_csv_fileName_full_path):
             self.fine_csv.to_csv(cleaned_fine_csv_fileName_full_path, sep='\t')
@@ -91,7 +91,7 @@ class CSV_processor:
     # Loads metadata with some cleaning
     def get_csv_file(self):
         # Create fine_csv
-        cleaned_fine_csv_fileName_full_path = os.path.join(self.data_root, self.suffix, cleaned_fine_csv_fileName)
+        cleaned_fine_csv_fileName_full_path = os.path.join(self.data_root, self.suffix, self.cleaned_fine_csv_fileName)
         if not os.path.exists(cleaned_fine_csv_fileName_full_path):
             # Load csv file, remove duplicates and invalid.
             csv_full_path = os.path.join(self.data_root, fine_csv_fileName)

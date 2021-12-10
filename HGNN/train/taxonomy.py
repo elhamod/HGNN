@@ -1,12 +1,13 @@
 import os
 import pandas as pd
+import math
 
 import pprint
 pp = pprint.PrettyPrinter(indent=4)
 
 # For phylogeny parsing
 from opentree import OT
-from ete3 import Tree
+from ete3 import Tree, PhyloTree
 
 Fix_Tree = True
 format_ = 1 #8
@@ -18,9 +19,11 @@ class Taxonomy:
         self.ott_id_dict = {}
         self.node_ids = node_ids
         self.fileNameAndPath = fileNameAndPath
+        self.total_distance = -1 # -1 means we never calculated it before.
 
         self.get_ott_ids(node_ids, verbose=verbose)
         self.get_tree(self.fileNameAndPath, self.ott_ids)
+        self.get_total_distance()
 
 
     def get_distance(self, species1, species2):
@@ -35,8 +38,59 @@ class Taxonomy:
         # ott_id2 = self.ott_id_dict[species2]
         # print(ott_id1, ott_id2, d)
         return d
+    
+    def get_total_distance(self):
+        # For one time, measure distance from all leaves down to root. They all should be equal.
+        # Save the value and reuse it.
+        
+        if self.total_distance==-1:
+            for leaf in self.tree.iter_leaves():
+                total_distance = self.tree.get_distance(leaf) # gets distance to rootprint
+                # print(total_distance)
+                assert math.isclose(self.total_distance, total_distance) or self.total_distance==-1
+                self.total_distance = total_distance
+
+        return self.total_distance
+
+    
+    def get_siblings_by_name(self, species, relative_distance, get_ottids = False, verbose=False):
+        ott_id = 'ott' + str(self.ott_id_dict[species])
+        return self.get_siblings_by_ottid(ott_id, relative_distance, get_ottids, verbose)
 
     # ------- privete functions
+
+    # relative_distance = 0 => species node itself
+    # relative_distance = 1 => all species
+    def get_siblings_by_ottid(self, ott_id, relative_distance, get_ottids = False, verbose=False):
+        abs_distance = relative_distance*self.total_distance
+        # for leaf in self.tree.iter_leaves():
+        #     print(leaf.name)
+        species_node = self.tree.search_nodes(name=ott_id)[0]
+        if verbose:
+            print('distance to common ancestor: ', abs_distance)
+        # print('species', ott_id, species_node)
+
+        # keep going up till distance exceeds abs_distance
+        distance = 0
+        parent = species_node
+        while distance < abs_distance:
+            parent = parent.up
+            distance = self.tree.get_distance(parent, species_node)
+            # print('distance', distance)
+        
+        # get all leaves under paernt
+        node_list = parent.get_leaves()
+        ott_id_list = list(map(lambda x: x.name, node_list))
+        if verbose:
+            print('species_list', len(ott_id_list),  ott_id_list)
+
+        if not get_ottids:
+            name_list = list(map(lambda x: next(key for key, value in self.ott_id_dict.items() if 'ott'+str(value) == x), ott_id_list)) # reverse lookup ott_id -> name
+            return name_list
+        
+
+        return ott_id_list
+
 
     # node_ids: list of taxa
     # returns: corresponding list of ott_ids
@@ -73,7 +127,7 @@ class Taxonomy:
             pp.pprint(ott_id_dict)
 
             # add ott_id to metadata csv file
-            df2['ott_id'] = df2.apply(lambda row: ott_id_dict[row['scientificName']], axis=1)
+            # df2['ott_id'] = df2.apply(lambda row: ott_id_dict[row['scientificName']], axis=1)
             # print(df)
 
         self.ott_ids = ott_ids
@@ -81,7 +135,7 @@ class Taxonomy:
         print(self.ott_id_dict)
 
     def fix_tree(self, fileNameAndPath):
-        tree = Tree(fileNameAndPath, format=format_)
+        tree = PhyloTree(fileNameAndPath, format=format_)
 
         # Fix Esox Americanus
         D = tree.search_nodes(name="mrcaott47023ott496121")[0]
@@ -101,4 +155,4 @@ class Taxonomy:
 
         
 
-        self.tree = Tree(fileNameAndPath, format=format_)
+        self.tree = PhyloTree(fileNameAndPath, format=format_)
