@@ -59,7 +59,7 @@ cover/
 *-copy*
 
 # Some unimportant files
-*-ipynb_checkpoint*
+*ipynb_checkpoint*
 
 # Translations
 *.mo
@@ -148,4 +148,4 @@ dmypy.json
 cython_debug/
 
 #wandb
-HGNN/train/wandb/*
+HGNN/train/wandb/**

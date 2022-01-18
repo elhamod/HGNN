@@ -236,6 +236,11 @@ class CNN_PhyloNN(nn.Module):
             self.fc_layers[level_name] = get_fc(int(i*self.len_features), output_size, num_of_layers=fc_layers)
         self.fc_layers = torch.nn.ModuleDict(self.fc_layers)
 
+        self.layer4_features = None
+        def getLayer4Features(module, input, output):
+            self.layer4_features = output
+        self.network[7].register_forward_hook(getLayer4Features)
+
         if device is not None:
             self.fc_layers = self.fc_layers.cuda()
             self.network = self.network.cuda()
@@ -272,12 +277,15 @@ class CNN_PhyloNN(nn.Module):
         "fine": True,
     }
     def activations(self, x, outputs=default_outputs):  
+        self.layer4_features = None
+
         # print('x', x.shape)
         features = self.network(x)
 
         activations = {
             "input": x,
-            "features": features,
+            "gap_features": features,
+            "layer4_features": self.layer4_features,
             "fine": self.fc_layers['fine'](features) if outputs["fine"] else None
         }
 
@@ -607,6 +615,11 @@ class CNN_Two_Nets(nn.Module):
                                        Flatten())
         self.g_y_fc = get_fc(num_ftrs_fine, self.numberOfFine, num_of_layers=fc_layers)
 
+        self.layer4_features = None
+        def getLayer4Features(module, input, output):
+            self.layer4_features = output
+        self.network_fine.layer4.register_forward_hook(getLayer4Features)
+
         if device is not None:
             self.g_y = self.g_y.cuda()
             self.h_y = self.h_y.cuda()
@@ -659,7 +672,9 @@ class CNN_Two_Nets(nn.Module):
         "fine": True,
         "coarse" : True
     }
-    def activations(self, x, outputs=default_outputs):  
+    def activations(self, x, outputs=default_outputs): 
+        self.layer4_features = None
+
         # print(x.shape)
         hy_features = self.h_y(x)
         # print(hy_features.shape)
@@ -702,13 +717,14 @@ class CNN_Two_Nets(nn.Module):
 
         activations = {
             "input": x,
-            "hy_features": hy_features, #mid species
-            "hb_features": hb_features, #mid genus
+            "hy_features": hy_features, #mid genus
+            "hb_features": hb_features, #mid species
             "hb_hy_features": hb_hy_features, #concat
             "gy_features": gy_features if outputs["fine"] else None, #final species
             "gc_features": gc_features if outputs["coarse"] else None, #final genus
             "coarse": yc if outputs["coarse"] and modelType_has_coarse else None,
-            "fine": y if outputs["fine"] else None
+            "fine": y if outputs["fine"] else None,
+            "layer4_features": self.layer4_features
         }
 
         return activations
