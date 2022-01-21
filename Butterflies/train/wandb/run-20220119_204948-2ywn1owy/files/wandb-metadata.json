@@ -1,0 +1,26 @@
+{
+    "os": "Linux-4.15.0-106-generic-x86_64-with-Ubuntu-18.04-bionic",
+    "python": "3.6.9",
+    "heartbeatAt": "2022-01-20T01:49:50.913958",
+    "startedAt": "2022-01-20T01:49:48.318125",
+    "docker": null,
+    "gpu": "TITAN RTX",
+    "gpu_count": 8,
+    "cpu_count": 72,
+    "cuda": "10.2.89",
+    "args": [
+        "-f",
+        "/home/elhamod/.local/share/jupyter/runtime/kernel-1645aa70-0eca-477b-9fbc-2f1724539f34.json"
+    ],
+    "state": "running",
+    "program": "<python with no main file>",
+    "git": {
+        "remote": "https://github.com/elhamod/HGNN.git",
+        "commit": "097d7e70b4510db5f5709cf918dc5ce64e9b298c"
+    },
+    "email": "mndhamod@gmail.com",
+    "root": "/home/elhamod/projects/phyloNNbutterflies/phyloNNbutterflies",
+    "host": "lambdapgml",
+    "username": "elhamod",
+    "executable": "/home/elhamod/melhamodenv3/bin/python3"
+}
