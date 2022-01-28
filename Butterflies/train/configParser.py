@@ -187,6 +187,8 @@ class ConfigParser:
         params["useCrossValidation"] = params["useCrossValidation"] if check_valid(params,"useCrossValidation") else False
         params["phyloDistances"] = params["phyloDistances"] if check_valid(params,"phyloDistances") else "0.75,0.5,0.25"
         params["addKernelOrthogonality"] = params["addKernelOrthogonality"] if check_valid(params,"addKernelOrthogonality") else False
+        params["useImbalancedSampling"] = params["useImbalancedSampling"] if check_valid(params,"useImbalancedSampling") else False
+        params["useImbalancedCriterion"] = params["useImbalancedCriterion"] if check_valid(params,"useImbalancedCriterion") else False
 
         return params
 

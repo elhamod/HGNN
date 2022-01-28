@@ -15,6 +15,8 @@ from myhelpers.dataset_normalization import dataset_normalization
 from myhelpers.color_PCA import Color_PCA
 from myhelpers.seeding import get_seed_from_trialNumber
 from myhelpers.read_write import Pickle_reader_writer
+from myhelpers.imbalanced import ImbalancedDatasetSampler
+
 
 from .configParser import getDatasetName
 from .CSV_processor import CSV_processor
@@ -79,6 +81,12 @@ class FishDataset(Dataset):
             self.csv_processor = CSV_processor(self.data_root, self.suffix, build_taxonomy=False)
         else:
             self.csv_processor = csv_processor
+            
+        # In case we want some stats
+#         label_and_freq = torch.unique(torch.tensor(self.dataset.targets), return_counts=True)
+#         for i in self.dataset.classes:
+#             print(i, self.dataset.class_to_idx[i], label_and_freq[1][self.dataset.class_to_idx[i]].cpu().detach().numpy())
+#         raise
 
     def getTransforms(self):
         transformsList = [#transforms.ToPILImage(),
@@ -147,6 +155,9 @@ class FishDataset(Dataset):
     def getIdxByFileName(self, fileName):
         return self.mapFileNameToIndex[fileName]
 
+    def get_labels(self):
+        return [x[1] for x in self.dataset.imgs]
+    
     def __getitem__(self, idx):   
         if self.composedTransforms is None:
             self.composedTransforms = transforms.Compose(self.getTransforms())
@@ -240,6 +251,7 @@ class datasetManager:
         batchSize = self.params["batchSize"]
         useCrossValidation = self.params["useCrossValidation"]
         n_splits = self.params["numOfTrials"]
+        useImbalancedSampling = self.params["useImbalancedSampling"]
 
         SEED_INT = get_seed_from_trialNumber(trial_num)
 
@@ -275,13 +287,19 @@ class datasetManager:
         # train_generator = None
         # val_generator = None
         if not useCrossValidation:
-            self.train_loader = torch.utils.data.DataLoader(self.dataset_train, pin_memory=True, generator=train_generator, shuffle=SHUFFLE, batch_size=batchSize, num_workers=num_of_workers, drop_last=DROPLAST, worker_init_fn=_init_fn)
+            train_subsampler = None
+            if useImbalancedSampling:
+                train_subsampler = ImbalancedDatasetSampler(self.dataset_train)
+            self.train_loader = torch.utils.data.DataLoader(self.dataset_train, pin_memory=True, generator=train_generator, sampler=train_subsampler, batch_size=batchSize, num_workers=num_of_workers, drop_last=DROPLAST, worker_init_fn=_init_fn)
             self.validation_loader = torch.utils.data.DataLoader(self.dataset_val, pin_memory=True, generator=val_generator, shuffle=SHUFFLE, batch_size=batchSize, num_workers=num_of_workers, drop_last=DROPLAST, worker_init_fn=_init_fn)
         elif trial_num is not None:
             # train_index, val_index = next(self.kf_splits)
             (train_index, val_index) = self.kf_splits[trial_num]
             # print(trial_num, train_index, val_index, len(train_index), len(val_index))
-            train_subsampler = torch.utils.data.SubsetRandomSampler(train_index) #SubsetRandomSampler
+            if not useImbalancedSampling:
+                train_subsampler = torch.utils.data.SubsetRandomSampler(train_index) #SubsetRandomSampler
+            else:
+                train_subsampler = ImbalancedDatasetSampler(self.dataset_train, indices=train_index)
             val_subsampler = torch.utils.data.SubsetRandomSampler(val_index) # SubsetRandomSampler
             self.train_loader = torch.utils.data.DataLoader(self.dataset_train, pin_memory=True, generator=train_generator, sampler=train_subsampler, batch_size=batchSize, num_workers=num_of_workers, drop_last=DROPLAST, worker_init_fn=_init_fn)
             self.validation_loader = torch.utils.data.DataLoader(self.dataset_train, pin_memory=True, generator=val_generator, sampler=val_subsampler, batch_size=batchSize, num_workers=num_of_workers, drop_last=DROPLAST, worker_init_fn=_init_fn)

@@ -1,0 +1,126 @@
+digraph tree {
+	"root" [label="", shape=circle]
+	"erato amalfreda" [label="erato amalfreda", shape=circle]
+	"erato amphitrite" [label="erato amphitrite", shape=circle]
+	"erato colombina" [label="erato colombina", shape=circle]
+	"erato cyrbia" [label="erato cyrbia", shape=circle]
+	"erato demophoon" [label="erato demophoon", shape=circle]
+	"erato dignus " [label="erato dignus ", shape=circle]
+	"erato emma" [label="erato emma", shape=circle]
+	"erato erato" [label="erato erato", shape=circle]
+	"erato favorinusxlativitta" [label="erato favorinusxlativitta", shape=circle]
+	"erato guarica" [label="erato guarica", shape=circle]
+	"erato hydara" [label="erato hydara", shape=circle]
+	"erato luscombei" [label="erato luscombei", shape=circle]
+	"erato microclea" [label="erato microclea", shape=circle]
+	"erato notabilis" [label="erato notabilis", shape=circle]
+	"erato venus" [label="erato venus", shape=circle]
+	"melpomene aglaope" [label="melpomene aglaope", shape=circle]
+	"melpomene amandus" [label="melpomene amandus", shape=circle]
+	"melpomene amaryllis" [label="melpomene amaryllis", shape=circle]
+	"melpomene ecuadorensis" [label="melpomene ecuadorensis", shape=circle]
+	"melpomene flagrans" [label="melpomene flagrans", shape=circle]
+	"melpomene malleti" [label="melpomene malleti", shape=circle]
+	"melpomene penelope" [label="melpomene penelope", shape=circle]
+	"melpomene schunkei" [label="melpomene schunkei", shape=circle]
+	"erato amalfreda1" [label="erato amalfreda", shape=circle]
+	"erato amphitrite4" [label="erato amphitrite", shape=circle]
+	"erato colombina5" [label="erato colombina", shape=circle]
+	"erato cyrbia6" [label="erato cyrbia", shape=circle]
+	"melpomene cythera6" [label="melpomene cythera", shape=circle]
+	"erato demophoon7" [label="erato demophoon", shape=circle]
+	"erato petiverana7" [label="erato petiverana", shape=circle]
+	"melpomene rosina7" [label="melpomene rosina", shape=circle]
+	"erato dignus 8" [label="erato dignus ", shape=circle]
+	"erato emma10" [label="erato emma", shape=circle]
+	"erato erato11" [label="erato erato", shape=circle]
+	"melpomene thelxiopeia11" [label="melpomene thelxiopeia", shape=circle]
+	"erato favorinusxlativitta12" [label="erato favorinusxlativitta", shape=circle]
+	"erato guarica14" [label="erato guarica", shape=circle]
+	"erato hydara15" [label="erato hydara", shape=circle]
+	"melpomene melpomene15" [label="melpomene melpomene", shape=circle]
+	"erato luscombei16" [label="erato luscombei", shape=circle]
+	"erato microclea18" [label="erato microclea", shape=circle]
+	"melpomene xenoclea18" [label="melpomene xenoclea", shape=circle]
+	"erato notabilis19" [label="erato notabilis", shape=circle]
+	"melpomene plesseni19" [label="melpomene plesseni", shape=circle]
+	"erato venus22" [label="erato venus", shape=circle]
+	"melpomene vulcanus22" [label="melpomene vulcanus", shape=circle]
+	"erato lativitta0" [label="erato lativitta", shape=circle]
+	"melpomene aglaope0" [label="melpomene aglaope", shape=circle]
+	"erato phyllis2" [label="erato phyllis", shape=circle]
+	"melpomene amandus2" [label="melpomene amandus", shape=circle]
+	"melpomene burchelli2" [label="melpomene burchelli", shape=circle]
+	"melpomene nanna2" [label="melpomene nanna", shape=circle]
+	"erato favorinus3" [label="erato favorinus", shape=circle]
+	"melpomene amaryllis3" [label="melpomene amaryllis", shape=circle]
+	"erato etylus9" [label="erato etylus", shape=circle]
+	"melpomene ecuadorensis9" [label="melpomene ecuadorensis", shape=circle]
+	"melpomene flagrans13" [label="melpomene flagrans", shape=circle]
+	"melpomene malleti17" [label="melpomene malleti", shape=circle]
+	"erato venustus20" [label="erato venustus", shape=circle]
+	"melpomene penelope20" [label="melpomene penelope", shape=circle]
+	"melpomene schunkei21" [label="melpomene schunkei", shape=circle]
+
+	"root" -> "melpomene aglaope"
+	"root" -> "erato amalfreda"
+	"root" -> "melpomene amandus"
+	"root" -> "melpomene amaryllis"
+	"root" -> "erato amphitrite"
+	"root" -> "erato colombina"
+	"root" -> "erato cyrbia"
+	"root" -> "erato demophoon"
+	"root" -> "erato dignus "
+	"root" -> "melpomene ecuadorensis"
+	"root" -> "erato emma"
+	"root" -> "erato erato"
+	"root" -> "erato favorinusxlativitta"
+	"root" -> "melpomene flagrans"
+	"root" -> "erato guarica"
+	"root" -> "erato hydara"
+	"root" -> "erato luscombei"
+	"root" -> "melpomene malleti"
+	"root" -> "erato microclea"
+	"root" -> "erato notabilis"
+	"root" -> "melpomene penelope"
+	"root" -> "melpomene schunkei"
+	"root" -> "erato venus"
+	"erato amalfreda" -> "erato amalfreda1"
+	"erato amphitrite" -> "erato amphitrite4"
+	"erato colombina" -> "erato colombina5"
+	"erato cyrbia" -> "erato cyrbia6"
+	"erato cyrbia" -> "melpomene cythera6"
+	"erato demophoon" -> "erato demophoon7"
+	"erato demophoon" -> "erato petiverana7"
+	"erato demophoon" -> "melpomene rosina7"
+	"erato dignus " -> "erato dignus 8"
+	"erato emma" -> "erato emma10"
+	"erato erato" -> "erato erato11"
+	"erato erato" -> "melpomene thelxiopeia11"
+	"erato favorinusxlativitta" -> "erato favorinusxlativitta12"
+	"erato guarica" -> "erato guarica14"
+	"erato hydara" -> "erato hydara15"
+	"erato hydara" -> "melpomene melpomene15"
+	"erato luscombei" -> "erato luscombei16"
+	"erato microclea" -> "erato microclea18"
+	"erato microclea" -> "melpomene xenoclea18"
+	"erato notabilis" -> "erato notabilis19"
+	"erato notabilis" -> "melpomene plesseni19"
+	"erato venus" -> "erato venus22"
+	"erato venus" -> "melpomene vulcanus22"
+	"melpomene aglaope" -> "melpomene aglaope0"
+	"melpomene aglaope" -> "erato lativitta0"
+	"melpomene amandus" -> "melpomene amandus2"
+	"melpomene amandus" -> "melpomene burchelli2"
+	"melpomene amandus" -> "melpomene nanna2"
+	"melpomene amandus" -> "erato phyllis2"
+	"melpomene amaryllis" -> "melpomene amaryllis3"
+	"melpomene amaryllis" -> "erato favorinus3"
+	"melpomene ecuadorensis" -> "melpomene ecuadorensis9"
+	"melpomene ecuadorensis" -> "erato etylus9"
+	"melpomene flagrans" -> "melpomene flagrans13"
+	"melpomene malleti" -> "melpomene malleti17"
+	"melpomene penelope" -> "melpomene penelope20"
+	"melpomene penelope" -> "erato venustus20"
+	"melpomene schunkei" -> "melpomene schunkei21"
+}

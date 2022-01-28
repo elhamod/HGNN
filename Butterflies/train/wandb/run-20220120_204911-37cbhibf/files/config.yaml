@@ -1,0 +1,160 @@
+wandb_version: 1
+
+L1reg:
+  desc: null
+  value: false
+_wandb:
+  desc: null
+  value:
+    cli_version: 0.10.28
+    framework: torch
+    is_jupyter_run: true
+    is_kaggle_kernel: false
+    python_version: 3.6.9
+    t:
+      1:
+      - 1
+      - 5
+      2:
+      - 1
+      - 5
+      4: 3.6.9
+      5: 0.10.28
+      8:
+      - 1
+      - 5
+adaptive_alpha:
+  desc: null
+  value: 0.5
+adaptive_lambda:
+  desc: null
+  value: 0.1
+adaptive_smoothing:
+  desc: null
+  value: false
+addKernelOrthogonality:
+  desc: null
+  value: false
+augmented:
+  desc: null
+  value: true
+batchSize:
+  desc: null
+  value: 256
+datasetName:
+  desc: null
+  value: datasplits/20f0713aa829f297aa689b1adefc4e7fe8a5024c8ffa1ae514fc5a6b
+displayName:
+  desc: null
+  value: hier_best_params
+epochs:
+  desc: null
+  value: 200
+experimentHash:
+  desc: null
+  value: 30f6fe17a6c3e0819f8c69a758260bc5ca596f32c79f4d5af875dd77
+experimentName:
+  desc: null
+  value: Butterflies_round2_0
+fc_layers:
+  desc: null
+  value: 1
+grayscale:
+  desc: null
+  value: false
+image_path:
+  desc: null
+  value: LowResolution
+img_res:
+  desc: null
+  value: 224
+lambda:
+  desc: null
+  value: 0.1
+learning_rate:
+  desc: null
+  value: 0.001
+link_layer:
+  desc: null
+  value: avgpool
+modelName:
+  desc: null
+  value: models/237620874ffc41d1a6d7256da90737e2d0a218d5d10e45224993ebf2
+modelType:
+  desc: null
+  value: BB
+noSpeciesBackprop:
+  desc: null
+  value: false
+numOfTrials:
+  desc: null
+  value: 3
+optimizer:
+  desc: null
+  value: adabelief
+patience:
+  desc: null
+  value: -1
+phyloDistances:
+  desc: null
+  value: 0.75,0.5,0.25
+phylogeny_loss:
+  desc: null
+  value: false
+phylogeny_loss_epsilon:
+  desc: null
+  value: 0.03
+pretrained:
+  desc: null
+  value: true
+random_fitting:
+  desc: null
+  value: false
+regularTripletLoss:
+  desc: null
+  value: false
+scheduler:
+  desc: null
+  value: plateau
+scheduler_gamma:
+  desc: null
+  value: 0.5
+scheduler_patience:
+  desc: null
+  value: 15
+suffix:
+  desc: null
+  value: preprocessed
+tl_extralayer:
+  desc: null
+  value: false
+tl_model:
+  desc: null
+  value: ResNet18
+trialHash:
+  desc: null
+  value: 237620874ffc41d1a6d7256da90737e2d0a218d5d10e45224993ebf2
+tripletEnabled:
+  desc: null
+  value: true
+tripletMargin:
+  desc: null
+  value: 2
+tripletSamples:
+  desc: null
+  value: 8
+tripletSelector:
+  desc: null
+  value: semihard
+triplet_layers_dic:
+  desc: null
+  value: layer2,layer4
+two_phase_lambda:
+  desc: null
+  value: false
+useCrossValidation:
+  desc: null
+  value: false
+weightdecay:
+  desc: null
+  value: 0.01

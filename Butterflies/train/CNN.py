@@ -37,6 +37,7 @@ from myhelpers.iterator import Infinite_iter
 from myhelpers.memory import get_cuda_memory
 from myhelpers.create_conv_layer import get_conv
 from myhelpers.orthogonal_convolutions import deconv_orth_dist, deconv_orth_dist2
+from myhelpers.imbalanced import get_class_weights
 
 
 modelFinalCheckpoint = 'finalModel.pt'
@@ -766,11 +767,14 @@ def get_scheduler(scheduler_type, optimizer, scheduler_gamma, scheduler_patience
     
     return scheduler
 
-def get_criterion(use_phylogeny_loss, phylogeny_loss_epsilon, distance_matrix, device):
+def get_criterion(use_phylogeny_loss, phylogeny_loss_epsilon, distance_matrix, device, weight=None):
+    weight_not_supported = True
     if not use_phylogeny_loss:
-        criterion = nn.CrossEntropyLoss()
+        criterion = nn.CrossEntropyLoss(weight=weight)
         # criterion = f1_criterion(device)
         # criterion = escort_criterion(device)
+        
+        weight_not_supported=False
     elif use_phylogeny_loss=="MSE":
         criterion = Phylogeny_MSE(distance_matrix, phylogeny_loss_epsilon)
     else:
@@ -778,6 +782,9 @@ def get_criterion(use_phylogeny_loss, phylogeny_loss_epsilon, distance_matrix, d
 
     if device is not None:
         criterion = criterion.cuda()
+    
+    if weight_not_supported and (weight is not None):
+        print("Warning! weighted", use_phylogeny_loss , "criterion is not supported")
 
     return criterion
 
@@ -795,6 +802,7 @@ def report_summaries(validation_loader, test_loader, model, params, device):
         wandb.run.summary["validation_fine_f1"] = validation_fine_f1
         wandb.run.summary["test_fine_f1"] = test_fine_f1
         wandb.run.summary["test_fine_acc"] = test_fine_acc
+#         wandb.run.summary.update({"final_logits": wandb.Histogram(logits)})
 
 def get_metrics(train_loader, validation_loader, test_loader, model, params, device, isDSN, getCoarse, detailed_reporting):
     test_fine_f1 = None
@@ -1203,7 +1211,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     # Setup hyperparameters
     optimizer = get_optimizer(optimizer_type, model, learning_rate, weight_decay)
     scheduler = get_scheduler(scheduler_type, optimizer, scheduler_gamma, scheduler_patience, learning_rate)
-    criterion = get_criterion(use_phylogeny_loss, phylogeny_loss_epsilon, train_loader.dataset.csv_processor.distance_matrix, device)
+    criterion = get_criterion(use_phylogeny_loss, phylogeny_loss_epsilon, train_loader.dataset.csv_processor.distance_matrix, device, weight=get_class_weights(train_loader.dataset.get_labels()))
     early_stopping = EarlyStopping(path=savedModelName, patience=patience)
 
     if phyloNN:
@@ -1213,6 +1221,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     print("Training started...")
     start = time.time()
 
+    
     with tqdm(total=n_epochs, desc="iteration") as bar:
         epochs = 0
         # For each epoch
@@ -1226,6 +1235,8 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                     for layer_name in layers['triplet_layers']:
                         triplet_hists[layer_name] = []
 
+                labels_logged_fordataimbalance=[]            
+                    
                 model.train()
                 # For each batch
                 for i, batch in enumerate(train_loader):
@@ -1236,6 +1247,8 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                         batch["image"] = batch["image"].cuda()
                         batch["fine"] = batch["fine"].cuda()
                         batch["coarse"] = batch["coarse"].cuda()
+                        
+                    labels_logged_fordataimbalance = labels_logged_fordataimbalance + batch["fine"].tolist()
 
                     optimizer.zero_grad()
                     with torch.set_grad_enabled(True):
@@ -1325,11 +1338,14 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                             
                         #     print('discriminator loss updated')
 
+#                         print([train_loader.dataset.csv_processor.getFineList()[i] for i in labels_logged_fordataimbalance])
                         wandb_dic = {"loss": loss.item()}
                         wandb_dic = {**wandb_dic, **adaptive_info} 
                         try_running(lambda : wandb.log(wandb_dic), WANDB_message)
                     
                         # print('end_of_batch', get_cuda_memory(device))
+                
+                try_running(lambda : wandb.log({"data_balance_histogram": wandb.Histogram(labels_logged_fordataimbalance), 'epoch':epoch}), WANDB_message)
                         
                 # Plot triplet loss histogram
                 if tripletEnabled and detailed_reporting:

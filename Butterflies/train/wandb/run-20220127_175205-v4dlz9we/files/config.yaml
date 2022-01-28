@@ -1,0 +1,165 @@
+wandb_version: 1
+
+L1reg:
+  desc: null
+  value: false
+_wandb:
+  desc: null
+  value:
+    cli_version: 0.10.28
+    framework: torch
+    is_jupyter_run: true
+    is_kaggle_kernel: false
+    python_version: 3.6.9
+    t:
+      1:
+      - 1
+      - 5
+      2:
+      - 1
+      - 5
+      3:
+      - 2
+      4: 3.6.9
+      5: 0.10.28
+      8:
+      - 1
+      - 5
+adaptive_alpha:
+  desc: null
+  value: 0.5
+adaptive_lambda:
+  desc: null
+  value: 0.1
+adaptive_smoothing:
+  desc: null
+  value: false
+addKernelOrthogonality:
+  desc: null
+  value: false
+augmented:
+  desc: null
+  value: true
+batchSize:
+  desc: null
+  value: 256
+datasetName:
+  desc: null
+  value: datasplits/a917eb2e4fc6c9750425ae03015bfd42c8ef7f1ac3fa49191683e3b7
+displayName:
+  desc: null
+  value: sampling no-triplet
+epochs:
+  desc: null
+  value: 300
+experimentHash:
+  desc: null
+  value: 03260ca09c6a752b28109cbacecb1e4612d2504dc39d0b4cc6268cc3
+experimentName:
+  desc: null
+  value: Butterflies_round3_sampling1
+fc_layers:
+  desc: null
+  value: 1
+grayscale:
+  desc: null
+  value: false
+image_path:
+  desc: null
+  value: LowResolution
+img_res:
+  desc: null
+  value: 224
+lambda:
+  desc: null
+  value: 0.1
+learning_rate:
+  desc: null
+  value: 0.0001
+link_layer:
+  desc: null
+  value: avgpool
+modelName:
+  desc: null
+  value: models/f0edf2f46920a6c612691dc3155d54cfef430647aafe50bef6cdb181
+modelType:
+  desc: null
+  value: BB
+noSpeciesBackprop:
+  desc: null
+  value: false
+numOfTrials:
+  desc: null
+  value: 5
+optimizer:
+  desc: null
+  value: adabelief
+patience:
+  desc: null
+  value: -1
+phyloDistances:
+  desc: null
+  value: 0.75,0.5,0.25
+phylogeny_loss:
+  desc: null
+  value: false
+phylogeny_loss_epsilon:
+  desc: null
+  value: 0.03
+pretrained:
+  desc: null
+  value: true
+random_fitting:
+  desc: null
+  value: false
+regularTripletLoss:
+  desc: null
+  value: false
+scheduler:
+  desc: null
+  value: plateau
+scheduler_gamma:
+  desc: null
+  value: 0.5
+scheduler_patience:
+  desc: null
+  value: 15
+suffix:
+  desc: null
+  value: full
+tl_extralayer:
+  desc: null
+  value: false
+tl_model:
+  desc: null
+  value: ResNet18
+trialHash:
+  desc: null
+  value: f0edf2f46920a6c612691dc3155d54cfef430647aafe50bef6cdb181
+tripletEnabled:
+  desc: null
+  value: false
+tripletMargin:
+  desc: null
+  value: 2
+tripletSamples:
+  desc: null
+  value: 8
+tripletSelector:
+  desc: null
+  value: semihard
+triplet_layers_dic:
+  desc: null
+  value: layer2,layer4
+two_phase_lambda:
+  desc: null
+  value: false
+useCrossValidation:
+  desc: null
+  value: false
+useImbalancedSampling:
+  desc: null
+  value: true
+weightdecay:
+  desc: null
+  value: 0.01

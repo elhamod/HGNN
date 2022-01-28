@@ -6,11 +6,16 @@ from tqdm import tqdm
 import time
 from .taxonomy import Taxonomy
 
+from scipy.sparse.csgraph import connected_components
+from scipy.sparse import csr_matrix
+
+
 
 
 # metadata file provided by dataset.
 fine_csv_fileName = "metadata.csv"
 cleaned_fine_tree_fileName = "cleaned_metadata.tre"
+comimics_fileName = 'comimics.csv'
 
 # metadata table headers.
 fine_csv_ott_header = 'ott_id'
@@ -50,6 +55,9 @@ class CSV_processor:
                 self.fine_csv[fine_csv_ott_header] = self.fine_csv.apply(lambda row: self.tax.ott_id_dict[row[fine_csv_scientificName_header]], axis=1)
 
         self.save_csv_file()
+
+        self.comimics_components = None
+        self.comimics_components_lables = None
 
     def getCoarseLabel(self, fileName):
         return self.fine_csv.loc[fileName][fine_csv_Coarse_header]
@@ -140,7 +148,9 @@ class CSV_processor:
 
     def get_target_from_layerName(self, batch, layer_name, hierarchyBased=True, z_triplet=None, triplet_layers_dic=['layer2', 'layer4']):
         first_layer = triplet_layers_dic[0]
-        second_layer = triplet_layers_dic[1]
+        second_layer = None
+        if hierarchyBased:
+            second_layer = triplet_layers_dic[1]
         result = None
         
         if layer_name == first_layer:
@@ -152,6 +162,37 @@ class CSV_processor:
         #         result = batch['fine']
             
         return result
+
+
+    def getComimicComponents(self):
+        if self.comimics_components is None:
+            fileFullPath = os.path.join(self.data_root, self.suffix, comimics_fileName)
+
+            # get dataframe
+            df = pd.read_csv(fileFullPath) 
+
+            #clean up
+            df = df[2:]
+            df.columns = df.iloc[0]
+            df = df[1:]
+
+            # make readable
+            df['FullSubspecies'] = df['Species'] + ' ' + df['Subspecies']
+            df = df.drop(columns=['Species', 'Subspecies', 'Subspecies number'])
+            df = df.set_index('FullSubspecies')
+
+            # extract matrix of connectivity
+            m = df.astype(int).to_numpy()
+            self.comimics_components_lables = list(df.index.values)
+
+            _, self.comimics_components = connected_components(csgraph=csr_matrix(m), directed=False, return_labels=True)
+
+            # self.comimics_components = list(map(lambda x: df.index[x], self.comimics_components))
+
+            print('comimics components:', self.comimics_components)
+
+
+        return self.comimics_components, self.comimics_components_lables
 
 
 
