@@ -14,6 +14,7 @@ from tqdm.notebook import tqdm
 from torchsummary import summary
 from adabelief_pytorch import AdaBelief
 import random
+import copy
 from sklearn.preprocessing import MultiLabelBinarizer
 
 
@@ -61,6 +62,66 @@ paramsFileName="params.json"
 WANDB_message="wandb not working"
 
 saved_models_per_iteration_frequency = 1
+
+
+
+# An object to keep track of all layers used while iterating through the data.
+default_triplet_layers_dic = [
+    ('layer2', "coarse"),
+    ('layer4', "fine"),
+]
+class TargetFromLayer():
+    def __init__(self, triplet_layers_dic=default_triplet_layers_dic) -> None:
+        self.triplet_layers_dic = triplet_layers_dic
+        self.reset()
+
+    def reset(self):
+        self.unusedLayersState = copy.deepcopy(self.triplet_layers_dic)
+
+    def hasLayer(self, layer_name, z_triplet=None):
+        for l in self.unusedLayersState:
+            l_name = l[0]
+            l_target = l[1]
+            if layer_name == l_name:
+                assert ((z_triplet is not None) and (l_name in z_triplet)), l_name + " should either be in triplet model " +  z_triplet.keys()
+                return l_target
+
+        return None
+
+
+    def get_target_from_layerName(self, batch, layer_name, z_triplet=None):
+        # first_layer = self.triplet_layers_dic[0]
+        # second_layer = None
+        # if self.hierarchyBased:
+        #     second_layer = self.triplet_layers_dic[1]
+        result = None
+
+        for i, l in enumerate(self.unusedLayersState):
+            l_name = l[0]
+            l_target = l[1]
+            # print(i, l_name, l_target, layer_name, layer_name == l_name)
+            if layer_name == l_name:
+                assert ((z_triplet is not None) and (l_name in z_triplet)), l_name + " should either be in triplet model " +  z_triplet.keys()
+                result = batch[l_target]
+                self.unusedLayersState.pop(i)
+                # print('ho', layer_name, l, result)
+                break
+
+            # if layer_name == first_layer:
+            #     result = batch['coarse' if self.hierarchyBased==True else 'fine']
+            # elif (z_triplet is not None) and (second_layer in z_triplet):
+            #     if (layer_name == second_layer):
+            #         result = batch['fine']
+        # elif (z_triplet is not None) and ('layer3' in z_triplet) and (layer_name == 'layer3'):
+        #         result = batch['fine']
+
+        # # When all layers have been consumed, reset the stack
+        # if len(self.unusedLayersState) == 0:
+        #     self.reset()
+
+
+        return result
+
 
 class ZeroModule(Module):
     def __init__(self, *args, **kwargs):
@@ -133,11 +194,15 @@ def parse_phyloDistances(phyloDistances_string):
 
 def get_architecture(params, csv_processor):
     modelType = params["modelType"]
+    coarseType = params["coarseType"]
     phylo_distances = parse_phyloDistances(params["phyloDistances"])
     num_of_fine = len(csv_processor.getFineList())
     architecture = { "fine": num_of_fine,}
     if modelType != "PhyloNN":
-        architecture["coarse"] = len(csv_processor.getCoarseList())
+        if coarseType == "coarse":
+            architecture["coarse"] = len(csv_processor.getCoarseList())
+        else:
+            architecture["coarse"] = len(csv_processor.comimics_components)
     else:
         for i in phylo_distances:
             architecture[str(i).replace(".", "")+"distance"] = num_of_fine
@@ -899,24 +964,31 @@ def add_loss(loss_name, criterion, output, batch, isDSN, losses):
     batch_lossname = loss_name if (loss_name == 'fine') or isDSN else 'coarse'
     losses[loss_name] = criterion(output[loss_name], batch[batch_lossname])
 
-def add_triplet_losses(loss_name, z_triplet, batch_triplet, params, nonzerotriplets, csv_processor, losses, detailed_reporting, triplet_hists, device):
+def add_triplet_losses(loss_name, z_triplet, batch_triplet, params, nonzerotriplets, targetFromLayer, losses, detailed_reporting, triplet_hists, device):
     margin = params["tripletMargin"]
-    regularTripletLoss = params["regularTripletLoss"]
+    # regularTripletLoss = params["regularTripletLoss"]
     selection_criterion = params["tripletSelector"]
-    triplet_layers_dic = params["triplet_layers_dic"].split(',')
+    # triplet_layers_dic = params["triplet_layers_dic"].split(',')
     if detailed_reporting:
-        print('triplet layers', triplet_layers_dic)
-    triplet_criterion = get_triplet_criterion(margin, selection_criterion, not regularTripletLoss, triplet_layers_dic, device)
+        print('triplet layers', targetFromLayer.triplet_layers_dic)
+    triplet_criterion = get_triplet_criterion(margin, selection_criterion, device) # , not regularTripletLoss
 
     # get loss from criterion 
     if (loss_name in z_triplet) and z_triplet[loss_name] is not None:
         # Check if this layer has a triplet loss implemented
-        if csv_processor.get_target_from_layerName(batch_triplet, loss_name, not regularTripletLoss, z_triplet, triplet_layers_dic) is not None:
-            losses[loss_name], nonzerotriplets[loss_name] = triplet_criterion(z_triplet, batch_triplet, loss_name, csv_processor)
+        # print('hello')
+        losses[loss_name] = 0 
+        nonzerotriplets[loss_name] = 0
+        while targetFromLayer.hasLayer(loss_name, z_triplet) is not None:
+            # print(loss_name)
+            loss_, nonzerotriplets_ = triplet_criterion(z_triplet, batch_triplet, loss_name, targetFromLayer)
+            losses[loss_name] += loss_
+            nonzerotriplets[loss_name] += nonzerotriplets_
+            # print(loss_name, losses[loss_name], nonzerotriplets[loss_name])
 
             if selection_criterion=="semihard":  
                 # print(losses[loss_name])
-                assert (losses[loss_name]-margin).le(torch.zeros_like(losses[loss_name])).all()
+                assert (loss_-margin).le(torch.zeros_like(loss_)).all()
             
             if detailed_reporting:
                 z_triplet_layer = z_triplet[loss_name]
@@ -926,6 +998,8 @@ def add_triplet_losses(loss_name, z_triplet, batch_triplet, params, nonzerotripl
                 z_triplet_layer_norm = z_triplet_layer
                 z_triplet_layer_norm = z_triplet_layer_norm.numpy()
                 triplet_hists[loss_name].append(z_triplet_layer_norm)
+
+        # print('-----')
 
 class Random_label_loss():
     def __init__(self):
@@ -1273,10 +1347,15 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                                 batch_triplet_input =batch_triplet_input.cuda()
                             # get output of model
                             z_triplet = applyModel(batch_triplet_input, model)
+                            
+                            triplet_layers_dic_processed = list(map(lambda x: eval(x), params['triplet_layers_dic'].split(';')))
+                            targetFromLayer = TargetFromLayer(triplet_layers_dic=triplet_layers_dic_processed)
 
                         # Populate losses
                         if exRandomFeatures:
                             random_label_loss = Random_label_loss()
+
+                        
                         for loss_name in loss_names:
                             if loss_name=="layer3" and L1_experiment:
                                 add_layer3_L1loss(loss_name, z[loss_name], losses)
@@ -1285,7 +1364,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                                 if z[loss_name] is not None:
                                     add_loss(loss_name, criterion, z, batch, isDSN, losses)
                             elif tripletEnabled:
-                                add_triplet_losses(loss_name, z_triplet, batch_triplet, params, nonzerotriplets, train_loader.dataset.csv_processor, losses, detailed_reporting, triplet_hists, device)
+                                add_triplet_losses(loss_name, z_triplet, batch_triplet, params, nonzerotriplets, targetFromLayer, losses, detailed_reporting, triplet_hists, device)
                             if (loss_name in layers['predictor_descriminator_layers']) and (exRandomFeatures):
                                 fine_list = train_loader.dataset.csv_processor.getFineList()
                                 random_label_loss.add_discriminator_predictor_loss(loss_name, z, batch, criterion, fine_list, losses, device)
@@ -1302,6 +1381,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                                 adaptive_info['lambda_'+loss_name] = lambdas[loss_name] 
                                 if loss_name in nonzerotriplets:
                                     adaptive_info['nonzerotriplets_'+loss_name] = nonzerotriplets[loss_name]  
+                        # print(losses, nonzerotriplets)
                         
                         #Two phase training
                         excluded_losses_from_lambda = ['fine'] # , 'discriminator'

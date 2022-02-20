@@ -178,7 +178,7 @@ class ConfigParser:
         params["scheduler_patience"] = params["scheduler_patience"] if check_valid(params,"scheduler_patience") else -1
         params["scheduler_gamma"] = params["scheduler_gamma"] if check_valid(params,"scheduler_gamma") else 0.5
         params["regularTripletLoss"] = params["regularTripletLoss"] if check_valid(params,"regularTripletLoss") else False
-        params["triplet_layers_dic"] = params["triplet_layers_dic"] if check_valid(params,"triplet_layers_dic") else 'layer2,layer4'
+        params["triplet_layers_dic"] = params["triplet_layers_dic"] if check_valid(params,"triplet_layers_dic") else "('layer2', 'coarse');('layer4', 'fine')"
         params["two_phase_lambda"] = params["two_phase_lambda"] if check_valid(params,"two_phase_lambda") else False
         params["L1reg"] = params["L1reg"] if check_valid(params,"L1reg") else False
         params["grayscale"] = params["grayscale"] if check_valid(params,"grayscale") else False
@@ -189,6 +189,7 @@ class ConfigParser:
         params["addKernelOrthogonality"] = params["addKernelOrthogonality"] if check_valid(params,"addKernelOrthogonality") else False
         params["useImbalancedSampling"] = params["useImbalancedSampling"] if check_valid(params,"useImbalancedSampling") else False
         params["useImbalancedCriterion"] = params["useImbalancedCriterion"] if check_valid(params,"useImbalancedCriterion") else False
+        params["coarseType"] = params["coarseType"] if check_valid(params,"coarseType") else "coarse"
 
         return params
 
