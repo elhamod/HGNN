@@ -58,6 +58,7 @@ class CSV_processor:
 
         self.comimics_components = None
         self.comimics_components_lables = None
+        self.getComimicComponents()
 
     def getCoarseLabel(self, fileName):
         return self.fine_csv.loc[fileName][fine_csv_Coarse_header]
@@ -146,22 +147,24 @@ class CSV_processor:
 
 
 
-    def get_target_from_layerName(self, batch, layer_name, hierarchyBased=True, z_triplet=None, triplet_layers_dic=['layer2', 'layer4']):
-        first_layer = triplet_layers_dic[0]
-        second_layer = None
-        if hierarchyBased:
-            second_layer = triplet_layers_dic[1]
-        result = None
+    # def get_target_from_layerName(self, batch, layer_name, hierarchyBased=True, z_triplet=None, triplet_layers_dic=['layer2', 'layer4']):
+    #     first_layer = triplet_layers_dic[0]
+    #     second_layer = None
+    #     if hierarchyBased:
+    #         second_layer = triplet_layers_dic[1]
+    #     result = None
         
-        if layer_name == first_layer:
-            result = batch['coarse' if hierarchyBased==True else 'fine']
-        elif (z_triplet is not None) and (second_layer in z_triplet):
-            if (layer_name == second_layer):
-                result = batch['fine']
-        # elif (z_triplet is not None) and ('layer3' in z_triplet) and (layer_name == 'layer3'):
-        #         result = batch['fine']
+    #     if layer_name == first_layer:
+    #         result = batch['coarse' if hierarchyBased==True else 'fine']
+    #     elif (z_triplet is not None) and (second_layer in z_triplet):
+    #         if (layer_name == second_layer):
+    #             result = batch['fine']
+    #     # elif (z_triplet is not None) and ('layer3' in z_triplet) and (layer_name == 'layer3'):
+    #     #         result = batch['fine']
+        
+    #     # TODO: lets use triplet_layers_dic=['layer4_1', 'layer4_2'] and write some code after trying everything, to use the suffix 
             
-        return result
+    #     return result
 
 
     def getComimicComponents(self):
@@ -189,7 +192,7 @@ class CSV_processor:
 
             # self.comimics_components = list(map(lambda x: df.index[x], self.comimics_components))
 
-            print('comimics components:', self.comimics_components)
+#             print('comimics components:', self.comimics_components)
 
 
         return self.comimics_components, self.comimics_components_lables
@@ -200,9 +203,6 @@ class CSV_processor:
 # exmaple: FFFFffFF.JPG -> FFFFffFF_
 def get_fileName_prefix(txt):
     return os.path.splitext(txt)[0]+"_"
-
-
-
 
 
 

@@ -54,6 +54,7 @@ class FishDataset(Dataset):
         self.composedTransforms = None   
         self.grayscale = params["grayscale"]
         self.random_fitting = params["random_fitting"]
+        self.ring_as_coarse = params["coarseType"]
         
         data_root_suffix = os.path.join(self.data_root, self.suffix, type_)
         if not os.path.exists(data_root_suffix):
@@ -178,8 +179,11 @@ class FishDataset(Dataset):
         img_fine_index = torch.tensor(img_fine_index)
 
 #         matchFamily = self.csv_processor.samples[idx]['family']
-        matchcoarse = self.csv_processor.getCoarseLabel(fileName)
-        matchcoarse_index = torch.tensor(self.csv_processor.getCoarseList().index(matchcoarse))
+        if self.ring_as_coarse=="coarse":
+            matchcoarse = self.csv_processor.getCoarseLabel(fileName)
+            matchcoarse_index = torch.tensor(self.csv_processor.getCoarseList().index(matchcoarse))
+        else:
+            matchcoarse_index = torch.tensor(self.csv_processor.comimics_components[img_fine_index])
 
         return {'image': image, 
                 'fine': img_fine_index if not self.random_fitting else hash(fileName_full)%len(self.csv_processor.getFineList()), 

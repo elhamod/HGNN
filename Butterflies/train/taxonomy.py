@@ -15,13 +15,10 @@ format_ = 1 #8
 
 class Taxonomy:
     def __init__(self, node_ids, fileNameAndPath, verbose=False):
-        self.ott_ids = []
-        self.ott_id_dict = {}
         self.node_ids = node_ids
         self.fileNameAndPath = fileNameAndPath
         self.total_distance = -1 # -1 means we never calculated it before.
 
-        self.get_ott_ids(node_ids, verbose=verbose)
         self.get_tree(self.fileNameAndPath, self.ott_ids)
         self.get_total_distance()
 
