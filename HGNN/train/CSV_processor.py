@@ -10,7 +10,6 @@ from .taxonomy import Taxonomy
 
 # metadata file provided by dataset.
 fine_csv_fileName = "metadata.csv"
-cleaned_fine_tree_fileName = "cleaned_metadata.tre"
 
 # Saved file names.
 statistic_countPerFine="count_per_fine.csv"
@@ -66,6 +65,13 @@ class CSV_processor:
          return sorted(self.fine_csv[fine_csv_scientificName_header].unique().tolist())    
     def getCoarseList(self): 
         return sorted(self.fine_csv[fine_csv_Coarse_header].unique().tolist())   
+    def getList(self, listName): 
+        if listName=='fine':
+            return self.getFineList()
+        elif listName=='coarse' or listName=="coarseLabel":
+            return self.getCoarseList()
+        else:
+            raise
     
     # Fine/Coarse conversions
     def getFineWithinCoarse(self, coarse):
@@ -130,8 +136,8 @@ class CSV_processor:
         df_nodupes = self.fine_csv[fine_csv_scientificName_header].drop_duplicates() # Will probably need more processing to deal with small letter...etc
         node_ids = df_nodupes.tolist()
 
-        cleaned_fine_tree_fileName_full_path = os.path.join(self.data_root, self.suffix, cleaned_fine_tree_fileName)
-        self.tax = Taxonomy(node_ids, cleaned_fine_tree_fileName_full_path, verbose=False)
+        cleaned_fine_tree_fileName_path = os.path.join(self.data_root, self.suffix)
+        self.tax = Taxonomy(node_ids, cleaned_fine_tree_fileName_path, verbose=False)
 
         # build distance matrix for efficiency
         fineList = self.getFineList()

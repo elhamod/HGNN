@@ -149,3 +149,4 @@ cython_debug/
 
 #wandb
 HGNN/train/wandb/**
+HGNN/analyse/wandb**

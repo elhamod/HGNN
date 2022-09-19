@@ -15,6 +15,8 @@ from myhelpers.dataset_normalization import dataset_normalization
 from myhelpers.color_PCA import Color_PCA
 from myhelpers.seeding import get_seed_from_trialNumber
 from myhelpers.read_write import Pickle_reader_writer
+from myhelpers.imbalanced import ImbalancedDatasetSampler
+
 
 from .configParser import getDatasetName
 from .CSV_processor import CSV_processor
@@ -40,6 +42,18 @@ def _init_fn(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
+getLabels_func = lambda dataset: dataset.targets#[x[1] for x in dataset.imgs]
+
+class getLabels_concat_func:
+    def __init__(self, dataset):
+        self.dataset = dataset
+        
+    def get_labels_func(self):
+        return self.get_labels
+    
+    def get_labels(self):
+        return self.dataset.datasets[0].dataset.targets + self.dataset.datasets[1].dataset.targets
+ 
 class FishDataset(Dataset):
     def __init__(self, type_, params, data_path, normalizer, color_pca, csv_processor, verbose=False):
         self.imageDimension = params["img_res"] # if None, CSV_processor will load original images
@@ -49,6 +63,7 @@ class FishDataset(Dataset):
         self.normalization_enabled = False
         self.pad = False
         self.normalizer = None
+        self.denormalizer = None
         self.composedTransforms = None   
         self.grayscale = params["grayscale"]
         self.random_fitting = params["random_fitting"]
@@ -61,8 +76,11 @@ class FishDataset(Dataset):
         self.mapFileNameToIndex = {} # This dictionary will make it easy to find the information of an image by its file name.
         if normalizer is not None:
             self.normalizer = normalizer
+            self.denormalizer = transforms.Normalize([-self.normalizer.mean[i] / self.normalizer.std[i] for i, _ in enumerate(self.normalizer.mean)], [1 / self.normalizer.std[i] for i, _ in enumerate(self.normalizer.mean)])
         else:
-            self.normalizer = dataset_normalization(data_root_suffix, self.dataset, res=params['img_res']).getTransform()[0]
+            normalizer_obj = dataset_normalization(data_root_suffix, self.dataset, res=params['img_res'])
+            self.normalizer = normalizer_obj.getTransform()[0]
+            self.denormalizer = normalizer_obj.getDenormalizeTransform()[0]
         self.RGBmean = [round(self.normalizer.mean[0]*255), round(self.normalizer.mean[1]*255), round(self.normalizer.mean[2]*255)]
         self.pad = True
 
@@ -79,6 +97,12 @@ class FishDataset(Dataset):
             self.csv_processor = CSV_processor(self.data_root, self.suffix)
         else:
             self.csv_processor = csv_processor
+            
+        # In case we want some stats
+#         label_and_freq = torch.unique(torch.tensor(self.dataset.targets), return_counts=True)
+#         for i in self.dataset.classes:
+#             print(i, self.dataset.class_to_idx[i], label_and_freq[1][self.dataset.class_to_idx[i]].cpu().detach().numpy())
+#         raise
 
     def getTransforms(self):
         transformsList = [#transforms.ToPILImage(),
@@ -147,6 +171,9 @@ class FishDataset(Dataset):
     def getIdxByFileName(self, fileName):
         return self.mapFileNameToIndex[fileName]
 
+    def get_labels(self): #, indices=slice(0,)
+        return getLabels_func(self.dataset)
+    
     def __getitem__(self, idx):   
         if self.composedTransforms is None:
             self.composedTransforms = transforms.Compose(self.getTransforms())
@@ -166,7 +193,7 @@ class FishDataset(Dataset):
         assert(target == img_fine_index), f"label in dataset is not the same as file name in csv, {fileName}, in dataset={target}, in csv={img_fine_index}"
         img_fine_index = torch.tensor(img_fine_index)
 
-#         matchFamily = self.csv_processor.samples[idx]['family']
+#       matchFamily = self.csv_processor.samples[idx]['family']
         matchcoarse = self.csv_processor.getCoarseLabel(fileName)
         matchcoarse_index = torch.tensor(self.csv_processor.getCoarseList().index(matchcoarse))
 
@@ -240,6 +267,7 @@ class datasetManager:
         batchSize = self.params["batchSize"]
         useCrossValidation = self.params["useCrossValidation"]
         n_splits = self.params["numOfTrials"]
+        useImbalancedSampling = self.params["useImbalancedSampling"]
 
         SEED_INT = get_seed_from_trialNumber(trial_num)
 
@@ -255,8 +283,9 @@ class datasetManager:
 
                 targets = self.dataset_train.dataset.targets
                 if self.dataset_val is not None:
-                    self.dataset_train = torch.utils.data.ConcatDataset([self.dataset_train,self.dataset_val])
+                    self.dataset_train = torch.utils.data.ConcatDataset([self.dataset_train, self.dataset_val])
                     self.dataset_train.csv_processor = self.dataset_val.csv_processor
+                    self.dataset_train.get_labels = getLabels_concat_func(self.dataset_train).get_labels_func()
                     targets = targets + self.dataset_train.datasets[1].dataset.targets
 
                 if self.kf_splits is None:
@@ -275,13 +304,19 @@ class datasetManager:
         # train_generator = None
         # val_generator = None
         if not useCrossValidation:
-            self.train_loader = torch.utils.data.DataLoader(self.dataset_train, pin_memory=True, generator=train_generator, shuffle=SHUFFLE, batch_size=batchSize, num_workers=num_of_workers, drop_last=DROPLAST, worker_init_fn=_init_fn)
+            train_subsampler = None
+            if useImbalancedSampling:
+                train_subsampler = ImbalancedDatasetSampler(self.dataset_train)
+            self.train_loader = torch.utils.data.DataLoader(self.dataset_train, pin_memory=True, generator=train_generator, sampler=train_subsampler, batch_size=batchSize, num_workers=num_of_workers, drop_last=DROPLAST, worker_init_fn=_init_fn)
             self.validation_loader = torch.utils.data.DataLoader(self.dataset_val, pin_memory=True, generator=val_generator, shuffle=SHUFFLE, batch_size=batchSize, num_workers=num_of_workers, drop_last=DROPLAST, worker_init_fn=_init_fn)
         elif trial_num is not None:
             # train_index, val_index = next(self.kf_splits)
             (train_index, val_index) = self.kf_splits[trial_num]
             # print(trial_num, train_index, val_index, len(train_index), len(val_index))
-            train_subsampler = torch.utils.data.SubsetRandomSampler(train_index) #SubsetRandomSampler
+            if not useImbalancedSampling:
+                train_subsampler = torch.utils.data.SubsetRandomSampler(train_index) #SubsetRandomSampler
+            else:
+                train_subsampler = ImbalancedDatasetSampler(self.dataset_train, indices=train_index)
             val_subsampler = torch.utils.data.SubsetRandomSampler(val_index) # SubsetRandomSampler
             self.train_loader = torch.utils.data.DataLoader(self.dataset_train, pin_memory=True, generator=train_generator, sampler=train_subsampler, batch_size=batchSize, num_workers=num_of_workers, drop_last=DROPLAST, worker_init_fn=_init_fn)
             self.validation_loader = torch.utils.data.DataLoader(self.dataset_train, pin_memory=True, generator=val_generator, sampler=val_subsampler, batch_size=batchSize, num_workers=num_of_workers, drop_last=DROPLAST, worker_init_fn=_init_fn)

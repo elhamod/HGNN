@@ -14,6 +14,7 @@ from tqdm.notebook import tqdm
 from torchsummary import summary
 from adabelief_pytorch import AdaBelief
 import random
+import copy
 from sklearn.preprocessing import MultiLabelBinarizer
 
 
@@ -37,6 +38,7 @@ from myhelpers.iterator import Infinite_iter
 from myhelpers.memory import get_cuda_memory
 from myhelpers.create_conv_layer import get_conv
 from myhelpers.orthogonal_convolutions import deconv_orth_dist, deconv_orth_dist2
+from myhelpers.imbalanced import get_class_weights
 
 
 modelFinalCheckpoint = 'finalModel.pt'
@@ -60,6 +62,66 @@ paramsFileName="params.json"
 WANDB_message="wandb not working"
 
 saved_models_per_iteration_frequency = 1
+
+
+
+# An object to keep track of all layers used while iterating through the data.
+default_triplet_layers_dic = [
+    ('layer2', "coarse"),
+    ('layer4', "fine"),
+]
+class TargetFromLayer():
+    def __init__(self, triplet_layers_dic=default_triplet_layers_dic) -> None:
+        self.triplet_layers_dic = triplet_layers_dic
+        self.reset()
+
+    def reset(self):
+        self.unusedLayersState = copy.deepcopy(self.triplet_layers_dic)
+
+    def hasLayer(self, layer_name, z_triplet=None):
+        for l in self.unusedLayersState:
+            l_name = l[0]
+            l_target = l[1]
+            if layer_name == l_name:
+                assert ((z_triplet is not None) and (l_name in z_triplet)), l_name + " should either be in triplet model " +  z_triplet.keys()
+                return l_target
+
+        return None
+
+
+    def get_target_from_layerName(self, batch, layer_name, z_triplet=None):
+        # first_layer = self.triplet_layers_dic[0]
+        # second_layer = None
+        # if self.hierarchyBased:
+        #     second_layer = self.triplet_layers_dic[1]
+        result = None
+
+        for i, l in enumerate(self.unusedLayersState):
+            l_name = l[0]
+            l_target = l[1]
+            # print(i, l_name, l_target, layer_name, layer_name == l_name)
+            if layer_name == l_name:
+                assert ((z_triplet is not None) and (l_name in z_triplet)), l_name + " should either be in triplet model " +  z_triplet.keys()
+                result = batch[l_target]
+                self.unusedLayersState.pop(i)
+                # print('ho', layer_name, l, result)
+                break
+
+            # if layer_name == first_layer:
+            #     result = batch['coarse' if self.hierarchyBased==True else 'fine']
+            # elif (z_triplet is not None) and (second_layer in z_triplet):
+            #     if (layer_name == second_layer):
+            #         result = batch['fine']
+        # elif (z_triplet is not None) and ('layer3' in z_triplet) and (layer_name == 'layer3'):
+        #         result = batch['fine']
+
+        # # When all layers have been consumed, reset the stack
+        # if len(self.unusedLayersState) == 0:
+        #     self.reset()
+
+
+        return result
+
 
 class ZeroModule(Module):
     def __init__(self, *args, **kwargs):
@@ -202,6 +264,129 @@ def get_layer_by_name(model, layer_name):
     return children_layers[model_subLayer_names.index(layer_name)]
 
 
+
+
+class CNN_PhyloNN_Autencoder(nn.Module):  
+    # Contructor
+    def __init__(self, architecture, params, device=None):
+
+        modelType = params["modelType"]
+        self.modelType = modelType
+        # img_res = params["img_res"]
+        self.phylo_distances = parse_phyloDistances(params["phyloDistances"])
+        self.device=device
+
+        if device is None:
+            print("Creating model on cpu!")
+        
+        super(CNN_PhyloNN_Autencoder, self).__init__()
+
+        # The pretrained models
+        self.network, num_ftrs = create_pretrained_model(params) 
+        self.network = torch.nn.Sequential(*getCustomTL_layer(self.network, None, None)) # includes average pooling
+        self.network = torch.nn.Sequential(*self.network, Flatten())
+        # features = self.network(torch.rand(1, 3, img_res, img_res))
+        # print('features', features.shape)
+        # self.len_features = features.shape[1]
+        self.len_features = num_ftrs
+        
+        output_size = architecture['fine']
+        self.fc_layers = {'fine': get_fc(self.len_features, output_size, num_of_layers=fc_layers)}
+        for i in self.phylo_distances:
+            level_name = str(i).replace(".", "")+"distance"
+            output_size = architecture[level_name]
+            self.fc_layers[level_name] = get_fc(int(i*self.len_features), output_size, num_of_layers=fc_layers)
+        self.fc_layers = torch.nn.ModuleDict(self.fc_layers)
+
+        # self.layer4_features = None
+        # def getLayer4Features(module, input, output):
+        #     self.layer4_features = output
+        # self.network[7].register_forward_hook(getLayer4Features)
+
+        if device is not None:
+            self.fc_layers = self.fc_layers.cuda()
+            self.network = self.network.cuda()
+
+        self.intermediate_output_layers = ['layer1','layer2','layer3','layer4']
+        for layer_ in self.intermediate_output_layers:
+            try:
+                layer = self.get_module(layer_)
+                layer.register_forward_hook(self.get_activation(layer_))
+            except:
+                print(layer_, 'not found')
+
+        
+    def get_activation(self, name):
+        def hook(model, input, output, detach=False):
+            self.activation[name] = output.detach() if detach==True else output
+        return hook
+    
+    def get_module(self,name):
+        if name == 'layer1':
+            return self.network[4]
+        elif name == 'layer2':
+            return self.network[5]
+        elif name == 'layer3':
+            return self.network[6]
+        elif name == 'layer4':
+            return self.network[7]
+        elif name == 'fc':
+            return self.fc_layers['fine'].linear0
+        elif name == 'conv1':
+            return self.network[0]
+        else:
+            raise Exception('layer not found')  
+    
+    # Prediction
+    def forward(self, x):
+        activations = self.activations(x)
+        result = {
+            "fine": activations["fine"]
+        }
+        for i in self.phylo_distances:
+            level_name = str(i).replace(".", "")+"distance"
+            result[level_name] = activations[level_name]
+        # print('result', result)
+        return result
+
+    default_outputs = {
+        "fine": True,
+    }
+    def activations(self, x, outputs=default_outputs):  
+        # self.layer4_features = None
+        self.activation = {"input": x}
+
+        # print('x', x.shape)
+        features = self.network(x)
+
+        self.activation = {**self.activation, **{
+            # "input": x,
+            "gap_features": features,
+            # "layer4_features": self.layer4_features,
+            "fine": self.fc_layers['fine'](features) if outputs["fine"] else None
+        }}
+
+        # flatten and aggregate intermediates
+        a = []
+        for layer_ in self.intermediate_output_layers:
+            a.append(torch.flatten(self.activation[layer_]).view(1,-1))
+        self.activation['all_intermediate'] = torch.cat(a, dim=1)
+
+        for i in self.phylo_distances:
+            level_name = str(i).replace(".", "")+"distance"
+            # print('level_name', level_name)
+            # print('bbb',features[:, :int(self.len_features*i)].shape)
+            # print('ccc', self.fc_layers[level_name])
+            self.activation[level_name] = self.fc_layers[level_name](features[:, :int(self.len_features*i)])
+        
+        # print('activations', activations)
+        activation = self.activation
+        self.activation = None
+
+        return activation
+
+
+
 class CNN_PhyloNN(nn.Module):  
     # Contructor
     def __init__(self, architecture, params, device=None):
@@ -236,15 +421,29 @@ class CNN_PhyloNN(nn.Module):
             self.fc_layers[level_name] = get_fc(int(i*self.len_features), output_size, num_of_layers=fc_layers)
         self.fc_layers = torch.nn.ModuleDict(self.fc_layers)
 
-        self.layer4_features = None
-        def getLayer4Features(module, input, output):
-            self.layer4_features = output
-        self.network[7].register_forward_hook(getLayer4Features)
+        # self.layer4_features = None
+        # def getLayer4Features(module, input, output):
+        #     self.layer4_features = output
+        # self.network[7].register_forward_hook(getLayer4Features)
 
         if device is not None:
             self.fc_layers = self.fc_layers.cuda()
             self.network = self.network.cuda()
+
+        self.intermediate_output_layers = ['layer1','layer2','layer3','layer4']
+        for layer_ in self.intermediate_output_layers:
+            try:
+                layer = self.get_module(layer_)
+                layer.register_forward_hook(self.get_activation(layer_))
+            except:
+                print(layer_, 'not found')
+
         
+    def get_activation(self, name):
+        def hook(model, input, output, detach=False):
+            self.activation[name] = output.detach() if detach==True else output
+        return hook
+    
     def get_module(self,name):
         if name == 'layer1':
             return self.network[4]
@@ -277,27 +476,37 @@ class CNN_PhyloNN(nn.Module):
         "fine": True,
     }
     def activations(self, x, outputs=default_outputs):  
-        self.layer4_features = None
+        # self.layer4_features = None
+        self.activation = {"input": x}
 
         # print('x', x.shape)
         features = self.network(x)
 
-        activations = {
-            "input": x,
+        self.activation = {**self.activation, **{
+            # "input": x,
             "gap_features": features,
-            "layer4_features": self.layer4_features,
+            # "layer4_features": self.layer4_features,
             "fine": self.fc_layers['fine'](features) if outputs["fine"] else None
-        }
+        }}
+
+        # flatten and aggregate intermediates
+        a = []
+        for layer_ in self.intermediate_output_layers:
+            a.append(torch.flatten(self.activation[layer_]).view(1,-1))
+        self.activation['all_intermediate'] = torch.cat(a, dim=1)
 
         for i in self.phylo_distances:
             level_name = str(i).replace(".", "")+"distance"
             # print('level_name', level_name)
             # print('bbb',features[:, :int(self.len_features*i)].shape)
             # print('ccc', self.fc_layers[level_name])
-            activations[level_name] = self.fc_layers[level_name](features[:, :int(self.len_features*i)])
+            self.activation[level_name] = self.fc_layers[level_name](features[:, :int(self.len_features*i)])
         
         # print('activations', activations)
-        return activations
+        activation = self.activation
+        self.activation = None
+
+        return activation
 
 class CNN_One_Net(nn.Module):
     def __init__(self, architecture, params, device=None):
@@ -325,7 +534,7 @@ class CNN_One_Net(nn.Module):
                 self.pretrained.classifier[0] = get_fc(num_ftrs_fine, self.numberOfFine, num_of_layers=fc_layers)
                 # print('fc replaced!')
 
-        self.intermediate_output_layers = ['layer1','layer2','layer3','layer4']
+        self.intermediate_output_layers = ['layer1','layer2','layer3','layer4', 'avgpool']
         for layer_ in self.intermediate_output_layers:
             try:
                 layer = self.get_module(layer_)
@@ -345,6 +554,8 @@ class CNN_One_Net(nn.Module):
             return self.pretrained.layer3
         elif name == 'layer4':
             return self.pretrained.layer4
+        elif name == 'avgpool':
+            return self.pretrained.avgpool
         else:
             raise Exception('layer not found')
     
@@ -381,6 +592,8 @@ class CNN_One_Net(nn.Module):
         y = self.pretrained(x)
 
         self.activation['fine'] = y
+        self.activation['gap_features'] = self.activation['avgpool']
+        del self.activation['avgpool']
         activation = self.activation
         self.activation = None
 
@@ -618,7 +831,11 @@ class CNN_Two_Nets(nn.Module):
         self.layer4_features = None
         def getLayer4Features(module, input, output):
             self.layer4_features = output
+        self.gapFeatures = None
+        def get_avgpoolFeatures(module, input, output):
+            self.gapFeatures = output
         self.network_fine.layer4.register_forward_hook(getLayer4Features)
+        self.network_fine.avgpool.register_forward_hook(get_avgpoolFeatures)
 
         if device is not None:
             self.g_y = self.g_y.cuda()
@@ -665,6 +882,8 @@ class CNN_Two_Nets(nn.Module):
             return self.g_y_fc.linear0
         elif name == 'conv1':
             return self.network_fine.conv1
+        elif name == 'avgpool':
+            return self.network_fine.avgpool
         else:
             raise Exception('layer not found')   
 
@@ -674,6 +893,7 @@ class CNN_Two_Nets(nn.Module):
     }
     def activations(self, x, outputs=default_outputs): 
         self.layer4_features = None
+        self.gapFeatures = None
 
         # print(x.shape)
         hy_features = self.h_y(x)
@@ -724,7 +944,8 @@ class CNN_Two_Nets(nn.Module):
             "gc_features": gc_features if outputs["coarse"] else None, #final genus
             "coarse": yc if outputs["coarse"] and modelType_has_coarse else None,
             "fine": y if outputs["fine"] else None,
-            "layer4_features": self.layer4_features
+            "layer4_features": self.layer4_features,
+            "gap_features": self.gapFeatures,
         }
 
         return activations
@@ -766,11 +987,14 @@ def get_scheduler(scheduler_type, optimizer, scheduler_gamma, scheduler_patience
     
     return scheduler
 
-def get_criterion(use_phylogeny_loss, phylogeny_loss_epsilon, distance_matrix, device):
+def get_criterion(use_phylogeny_loss, phylogeny_loss_epsilon, distance_matrix, device, weight=None):
+    weight_not_supported = True
     if not use_phylogeny_loss:
-        criterion = nn.CrossEntropyLoss()
+        criterion = nn.CrossEntropyLoss(weight=weight)
         # criterion = f1_criterion(device)
         # criterion = escort_criterion(device)
+        
+        weight_not_supported=False
     elif use_phylogeny_loss=="MSE":
         criterion = Phylogeny_MSE(distance_matrix, phylogeny_loss_epsilon)
     else:
@@ -778,6 +1002,9 @@ def get_criterion(use_phylogeny_loss, phylogeny_loss_epsilon, distance_matrix, d
 
     if device is not None:
         criterion = criterion.cuda()
+
+    if weight_not_supported and (weight is not None):
+        print("Warning! weighted", use_phylogeny_loss , "criterion is not supported")
 
     return criterion
 
@@ -795,6 +1022,7 @@ def report_summaries(validation_loader, test_loader, model, params, device):
         wandb.run.summary["validation_fine_f1"] = validation_fine_f1
         wandb.run.summary["test_fine_f1"] = test_fine_f1
         wandb.run.summary["test_fine_acc"] = test_fine_acc
+#         wandb.run.summary.update({"final_logits": wandb.Histogram(logits)})
 
 def get_metrics(train_loader, validation_loader, test_loader, model, params, device, isDSN, getCoarse, detailed_reporting):
     test_fine_f1 = None
@@ -891,24 +1119,31 @@ def add_loss(loss_name, criterion, output, batch, isDSN, losses):
     batch_lossname = loss_name if (loss_name == 'fine') or isDSN else 'coarse'
     losses[loss_name] = criterion(output[loss_name], batch[batch_lossname])
 
-def add_triplet_losses(loss_name, z_triplet, batch_triplet, params, nonzerotriplets, csv_processor, losses, detailed_reporting, triplet_hists, device):
+def add_triplet_losses(loss_name, z_triplet, batch_triplet, params, nonzerotriplets, targetFromLayer, losses, detailed_reporting, triplet_hists, device):
     margin = params["tripletMargin"]
-    regularTripletLoss = params["regularTripletLoss"]
+    # regularTripletLoss = params["regularTripletLoss"]
     selection_criterion = params["tripletSelector"]
-    triplet_layers_dic = params["triplet_layers_dic"].split(',')
+    # triplet_layers_dic = params["triplet_layers_dic"].split(',')
     if detailed_reporting:
-        print('triplet layers', triplet_layers_dic)
-    triplet_criterion = get_triplet_criterion(margin, selection_criterion, not regularTripletLoss, triplet_layers_dic, device)
+        print('triplet layers', targetFromLayer.triplet_layers_dic)
+    triplet_criterion = get_triplet_criterion(margin, selection_criterion, device) # , not regularTripletLoss
 
     # get loss from criterion 
     if (loss_name in z_triplet) and z_triplet[loss_name] is not None:
         # Check if this layer has a triplet loss implemented
-        if csv_processor.get_target_from_layerName(batch_triplet, loss_name, not regularTripletLoss, z_triplet, triplet_layers_dic) is not None:
-            losses[loss_name], nonzerotriplets[loss_name] = triplet_criterion(z_triplet, batch_triplet, loss_name, csv_processor)
+        # print('hello')
+        losses[loss_name] = 0 
+        nonzerotriplets[loss_name] = 0
+        while targetFromLayer.hasLayer(loss_name, z_triplet) is not None:
+            # print(loss_name)
+            loss_, nonzerotriplets_ = triplet_criterion(z_triplet, batch_triplet, loss_name, targetFromLayer)
+            losses[loss_name] += loss_
+            nonzerotriplets[loss_name] += nonzerotriplets_
+            # print(loss_name, losses[loss_name], nonzerotriplets[loss_name])
 
             if selection_criterion=="semihard":  
                 # print(losses[loss_name])
-                assert (losses[loss_name]-margin).le(torch.zeros_like(losses[loss_name])).all()
+                assert (loss_-margin).le(torch.zeros_like(loss_)).all()
             
             if detailed_reporting:
                 z_triplet_layer = z_triplet[loss_name]
@@ -918,6 +1153,8 @@ def add_triplet_losses(loss_name, z_triplet, batch_triplet, params, nonzerotripl
                 z_triplet_layer_norm = z_triplet_layer
                 z_triplet_layer_norm = z_triplet_layer_norm.numpy()
                 triplet_hists[loss_name].append(z_triplet_layer_norm)
+
+        # print('-----')
 
 class Random_label_loss():
     def __init__(self):
@@ -1203,7 +1440,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     # Setup hyperparameters
     optimizer = get_optimizer(optimizer_type, model, learning_rate, weight_decay)
     scheduler = get_scheduler(scheduler_type, optimizer, scheduler_gamma, scheduler_patience, learning_rate)
-    criterion = get_criterion(use_phylogeny_loss, phylogeny_loss_epsilon, train_loader.dataset.csv_processor.distance_matrix, device)
+    criterion = get_criterion(use_phylogeny_loss, phylogeny_loss_epsilon, train_loader.dataset.csv_processor.distance_matrix, device, weight=get_class_weights(train_loader.dataset.get_labels()))
     early_stopping = EarlyStopping(path=savedModelName, patience=patience)
 
     if phyloNN:
@@ -1213,6 +1450,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
     print("Training started...")
     start = time.time()
 
+    
     with tqdm(total=n_epochs, desc="iteration") as bar:
         epochs = 0
         # For each epoch
@@ -1220,12 +1458,14 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
             # print('epoch', epoch)
 
             if epoch != 0:
+                triplet_hists = {}
                 if tripletEnabled and detailed_reporting:
                     # Triplet loss histogram
-                    triplet_hists = {}
                     for layer_name in layers['triplet_layers']:
                         triplet_hists[layer_name] = []
 
+                labels_logged_fordataimbalance=[]            
+                    
                 model.train()
                 # For each batch
                 for i, batch in enumerate(train_loader):
@@ -1236,6 +1476,8 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                         batch["image"] = batch["image"].cuda()
                         batch["fine"] = batch["fine"].cuda()
                         batch["coarse"] = batch["coarse"].cuda()
+                        
+                    labels_logged_fordataimbalance = labels_logged_fordataimbalance + batch["fine"].tolist()
 
                     optimizer.zero_grad()
                     with torch.set_grad_enabled(True):
@@ -1260,10 +1502,15 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                                 batch_triplet_input =batch_triplet_input.cuda()
                             # get output of model
                             z_triplet = applyModel(batch_triplet_input, model)
+                            
+                            triplet_layers_dic_processed = list(map(lambda x: eval(x), params['triplet_layers_dic'].split(';')))
+                            targetFromLayer = TargetFromLayer(triplet_layers_dic=triplet_layers_dic_processed)
 
                         # Populate losses
                         if exRandomFeatures:
                             random_label_loss = Random_label_loss()
+
+                        
                         for loss_name in loss_names:
                             if loss_name=="layer3" and L1_experiment:
                                 add_layer3_L1loss(loss_name, z[loss_name], losses)
@@ -1272,7 +1519,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                                 if z[loss_name] is not None:
                                     add_loss(loss_name, criterion, z, batch, isDSN, losses)
                             elif tripletEnabled:
-                                add_triplet_losses(loss_name, z_triplet, batch_triplet, params, nonzerotriplets, train_loader.dataset.csv_processor, losses, detailed_reporting, triplet_hists, device)
+                                add_triplet_losses(loss_name, z_triplet, batch_triplet, params, nonzerotriplets, targetFromLayer, losses, detailed_reporting, triplet_hists, device)
                             if (loss_name in layers['predictor_descriminator_layers']) and (exRandomFeatures):
                                 fine_list = train_loader.dataset.csv_processor.getFineList()
                                 random_label_loss.add_discriminator_predictor_loss(loss_name, z, batch, criterion, fine_list, losses, device)
@@ -1289,6 +1536,7 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                                 adaptive_info['lambda_'+loss_name] = lambdas[loss_name] 
                                 if loss_name in nonzerotriplets:
                                     adaptive_info['nonzerotriplets_'+loss_name] = nonzerotriplets[loss_name]  
+                        # print(losses, nonzerotriplets)
                         
                         #Two phase training
                         excluded_losses_from_lambda = ['fine'] # , 'discriminator'
@@ -1325,11 +1573,14 @@ def trainModel(train_loader, validation_loader, params, model, savedModelName, t
                             
                         #     print('discriminator loss updated')
 
+#                         print([train_loader.dataset.csv_processor.getFineList()[i] for i in labels_logged_fordataimbalance])
                         wandb_dic = {"loss": loss.item()}
                         wandb_dic = {**wandb_dic, **adaptive_info} 
                         try_running(lambda : wandb.log(wandb_dic), WANDB_message)
                     
                         # print('end_of_batch', get_cuda_memory(device))
+                
+                try_running(lambda : wandb.log({"data_balance_histogram": wandb.Histogram(labels_logged_fordataimbalance), 'epoch':epoch}), WANDB_message)
                         
                 # Plot triplet loss histogram
                 if tripletEnabled and detailed_reporting:
