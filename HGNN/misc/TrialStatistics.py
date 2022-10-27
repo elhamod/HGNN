@@ -353,9 +353,9 @@ def printF1table(self, trial_params, dataset):
         df.to_csv(os.path.join(self.experiment_name, file_name+".csv"))  
     
     
-    def preProcessParameters(self, trial_params):
-        trial_params_copy = {**trial_params, **{}}
-        return trial_params_copy
+def preProcessParameters(self, trial_params):
+    trial_params_copy = {**trial_params, **{}}
+    return trial_params_copy
 
 def getTrialName(trial_params, trial_number=None):
     trialName = str(trial_params)
